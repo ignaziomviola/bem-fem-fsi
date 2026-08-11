@@ -1,4 +1,4 @@
-# Fluid-structure interaction: a free-wake panel method coupled to a finite element solid
+# bem-fem-fsi: a free-wake panel method coupled to a finite element solid
 
 A Python code computing the unsteady loads on a deformable finite wing in
 incompressible flow, and the deformation those loads produce. The fluid is a

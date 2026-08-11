@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
-title: "fsi-bem-fem: a free-wake panel method coupled to a three-dimensional finite element solid"
+title: "bem-fem-fsi: a free-wake panel method coupled to a three-dimensional finite element solid"
 abstract: >-
   A Python code computing the unsteady loads on a deformable finite wing in
   incompressible flow and the deformation those loads produce. The fluid is a
@@ -25,7 +25,7 @@ authors:
     affiliation: "University of Edinburgh"
     email: i.m.viola@ed.ac.uk
 license: MIT
-repository-code: "https://github.com/ignaziomviola/fsi-bem-fem"
+repository-code: "https://github.com/ignaziomviola/bem-fem-fsi"
 date-released: 2026-08-11
 keywords:
   - fluid-structure interaction

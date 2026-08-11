@@ -34,7 +34,7 @@ copied: they belong to the upstream repository and are cited from
 This is the precedent `freewake_kernels.py` already sets upstream, where seven
 functions of `panel_wing.py` were duplicated so that a fresh clone runs on its
 own, "collected in one module so that the duplication stays visible". The same
-reasoning applies one level up. A fresh clone of `fsi-bem-fem` runs the entire
+reasoning applies one level up. A fresh clone of `bem-fem-fsi` runs the entire
 fluid verification programme without a second checkout, a submodule pointer or
 a path variable, and the two vendored suites above are part of this
 repository's own test run: a divergence in behaviour would fail them here.
