@@ -253,13 +253,13 @@ def case_anisotropy(verbose=True):
                           / np.abs(iso.tangent()).max())
     if verbose:
         _rule("F6 anisotropy: the seam the material extension runs through")
-        print(f"  orthotropic with equal constants reduces to isotropic  "
+        print("  orthotropic with equal constants reduces to isotropic  "
               f"{reduction:.2e}")
-        print(f"  isotropic modulus is invariant under a rotation        "
+        print("  isotropic modulus is invariant under a rotation        "
               f"{isotropic_rot:.2e}")
-        print(f"  carbon-like modulus rotates as D -> T^T D T            "
+        print("  carbon-like modulus rotates as D -> T^T D T            "
               f"{covariance:.2e}")
-        print(f"  strain energy is invariant under the rotation          "
+        print("  strain energy is invariant under the rotation          "
               f"{invariance:.2e}")
         print("  The rotation operator is built by pushing the six Voigt basis")
         print("  strains through the tensor transformation, so the engineering-")
@@ -358,9 +358,9 @@ def case_integrator(steps=(16, 32, 64, 128), spectral=(1.0, 0.9, 0.8, 0.5),
         for n_steps, measured, theory, amplitude in elongation:
             print(f"  {n_steps:>16d}   {measured:+.6e}     {theory:.6e}      "
                   f"{amplitude:.6f}")
-        print(f"\n  numerical dissipation, dt sized for mode 1 at 32 steps per")
+        print("\n  numerical dissipation, dt sized for mode 1 at 32 steps per")
         print(f"  period, {cycles} cycles; mode 9 is {ratio_hi:.0f} times faster and")
-        print(f"  therefore far beyond its own Nyquist limit")
+        print("  therefore far beyond its own Nyquist limit")
         print("  rho_inf   resolved mode 1   unresolved mode 9")
         for rho_inf, low, hi in dissipation:
             print(f"  {rho_inf:>7.1f}   {low:15.6f}   {hi:17.6f}")

@@ -25,9 +25,18 @@ import unittest
 MANIFEST = pathlib.Path(__file__).with_name("fluid_manifest.txt")
 ROOT = pathlib.Path(__file__).parent
 
-VENDORED = ("thick_panel_wing.py", "unsteady_wing.py", "freewake_kernels.py",
-            "make_thick_sample_inputs.py", "test_thick_panel_wing.py",
-            "test_unsteady_wing.py", "verify_analytic.py", "verify_unsteady.py")
+VENDORED_CODE = ("thick_panel_wing.py", "unsteady_wing.py",
+                 "freewake_kernels.py", "make_thick_sample_inputs.py",
+                 "test_thick_panel_wing.py", "test_unsteady_wing.py",
+                 "verify_analytic.py", "verify_unsteady.py")
+
+# the fluid solver's own specification documents, copied so that this
+# repository carries the authority for the physics it runs rather than a link
+# to it. docs/fluid/INDEX.md, which is written here, is NOT in this list.
+VENDORED_DOCS = ("docs/fluid/DESIGN.md", "docs/fluid/UNSTEADY.md",
+                 "docs/fluid/ARCHITECTURE.md", "docs/fluid/README.md")
+
+VENDORED = VENDORED_CODE + VENDORED_DOCS
 
 UPSTREAM = ("https://github.com/ignaziomviola/"
             "time-dependent-free-wake-panel-method")
@@ -50,10 +59,10 @@ def read_manifest():
 
 
 def write_manifest():
-    lines = [f"# SHA-256 of the files vendored verbatim from",
+    lines = ["# SHA-256 of the files vendored verbatim from",
              f"# {UPSTREAM}",
              f"# commit {COMMIT}",
-             f"# Regenerate with: python3 test_vendored.py --write"]
+             "# Regenerate with: python3 test_vendored.py --write"]
     lines += [f"{digest(ROOT / name)}  {name}" for name in VENDORED]
     MANIFEST.write_text("\n".join(lines) + "\n")
     return MANIFEST
@@ -77,15 +86,27 @@ class TestVendoredFluid(unittest.TestCase):
                 f"manifest with 'python3 test_vendored.py --write' in the same "
                 f"commit.")
 
+    def test_the_documents_are_present(self):
+        """The physics this code runs is specified in the vendored documents,
+        so a clone without them carries code whose authority is elsewhere."""
+        for name in VENDORED_DOCS:
+            self.assertTrue((ROOT / name).exists(), f"{name} is missing")
+        index = ROOT / "docs" / "fluid" / "INDEX.md"
+        self.assertTrue(index.exists(), "docs/fluid/INDEX.md is missing")
+        self.assertNotIn("docs/fluid/INDEX.md", read_manifest(),
+                         "INDEX.md is written here and must not be in the "
+                         "vendored manifest")
+
     def test_the_fluid_modules_import_without_side_effects(self):
         """No prompt, no print, no figure and no file at import."""
         import io
         import contextlib
+        import importlib
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            import thick_panel_wing            # noqa: F401
-            import unsteady_wing               # noqa: F401
-            import freewake_kernels            # noqa: F401
+            for name in ("thick_panel_wing", "unsteady_wing",
+                         "freewake_kernels"):
+                importlib.import_module(name)
         self.assertEqual(buffer.getvalue(), "")
         self.assertNotIn("matplotlib", sys.modules,
                          "importing the solver pulled in a figure backend")

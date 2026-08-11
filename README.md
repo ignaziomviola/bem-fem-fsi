@@ -229,10 +229,17 @@ library `unittest`, following the upstream convention.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - block boundaries, state
   contracts, public signatures, extension hooks, and what the coupling
   extension cost against what the fluid architecture predicted.
-- [docs/FLUID.md](docs/FLUID.md) - provenance of the vendored fluid solver.
+- [docs/FLUID.md](docs/FLUID.md) - provenance of the vendored fluid solver and
+  how to check the copy.
+- [docs/fluid/](docs/fluid/) - the fluid solver's own documents, vendored
+  verbatim: [DESIGN.md](docs/fluid/DESIGN.md) owns the steady formulation and
+  every sign convention, [UNSTEADY.md](docs/fluid/UNSTEADY.md) the
+  time-dependent formulation and the shedding scheme,
+  [ARCHITECTURE.md](docs/fluid/ARCHITECTURE.md) the fluid block boundaries, and
+  [INDEX.md](docs/fluid/INDEX.md) explains how to read them from here.
 
-The fluid formulation is documented in the upstream repository, in its
-`DESIGN.md`, `UNSTEADY.md` and `ARCHITECTURE.md`. Read them there.
+Nothing in this repository depends on a document living anywhere else: a clone
+carries the full specification of both physics, both codes and every result.
 
 ## Licence
 

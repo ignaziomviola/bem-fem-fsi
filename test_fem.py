@@ -269,6 +269,143 @@ class TestElement(unittest.TestCase):
                                delta=0.12)
 
 
+class TestMaterialSeam(unittest.TestCase):
+    """The model-level plumbing of the material extension.
+
+    The materials themselves are gated in TestMaterials; what these check is
+    that an anisotropic or multi-material model actually ASSEMBLES, which is
+    the half of the claim that lives in fem_solid rather than in
+    fem_materials, and which nothing else exercises.
+    """
+
+    def setUp(self):
+        self.mesh = fem_mesh.box_mesh(1.0, 0.2, 0.1, 3, 2, 2)
+        self.carbon = fmat.OrthotropicElastic(150e9, 10e9, 10e9, 5e9, 3.5e9,
+                                              5e9, 0.3, 0.3, 0.4, 1600.0)
+        self.quarter_turn = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0],
+                                      [0.0, 0.0, 1.0]])
+
+    def _build(self, material, **kw):
+        return fes.build_model(self.mesh["nodes"], self.mesh["elements"],
+                               material, **kw)
+
+    def _pull(self, model, component=0):
+        """Mean extension of the far face under an axial load."""
+        state = fes.init_state(model)
+        fes.clamp(state, self.mesh["node_sets"]["x_min"])
+        fes.assemble_operators(state)
+        f_ext = np.zeros_like(state["u"])
+        face = self.mesh["node_sets"]["x_max"]
+        f_ext[face, component] = 1.0e4 / len(face)
+        level = fes.solve_static(state, f_ext)
+        return float(level["u"][face, component].mean())
+
+    def test_a_single_orientation_is_broadcast_over_the_elements(self):
+        model = self._build(self.carbon, orientation=self.quarter_turn)
+        self.assertEqual(model["orientation"].shape,
+                         (len(self.mesh["elements"]), 3, 3))
+        k_mat = fes.assemble_stiffness(model)
+        self.assertLess(np.abs(k_mat - k_mat.T).max() / np.abs(k_mat).max(),
+                        1e-14)
+
+    def test_rotating_the_material_rotates_the_structure(self):
+        """A quarter turn about z puts the soft axis along x, so the same bar
+        must become markedly more compliant in tension. The fibre direction has
+        to reach the assembly for this to happen at all."""
+        along_fibres = self._pull(self._build(self.carbon))
+        across_fibres = self._pull(self._build(self.carbon,
+                                               orientation=self.quarter_turn))
+        self.assertGreater(across_fibres / along_fibres, 3.0)
+
+    def test_two_materials_assemble_through_mat_id(self):
+        ids = np.zeros(len(self.mesh["elements"]), dtype=np.int64)
+        ids[::2] = 1
+        model = fes.build_model(self.mesh["nodes"], self.mesh["elements"],
+                                [fmat.IsotropicElastic(**ALU), self.carbon],
+                                mat_id=ids)
+        k_mat = fes.assemble_stiffness(model)
+        m_mat = fes.assemble_mass(model)
+        self.assertLess(np.abs(k_mat - k_mat.T).max() / np.abs(k_mat).max(),
+                        1e-14)
+        volume = model["cache"]["volume"]
+        expect = float((volume * np.where(ids == 1, self.carbon.rho,
+                                          ALU["rho"])).sum())
+        rigid = np.tile([0.0, 0.0, 1.0], len(self.mesh["nodes"]))
+        self.assertAlmostEqual(rigid @ (m_mat @ rigid) / expect, 1.0, places=10)
+        rng = np.random.default_rng(21)
+        u = rng.normal(size=self.mesh["nodes"].shape) * 1e-6
+        f_int, _, _ = fes.internal_force(model, u)
+        f_k = (k_mat @ u.reshape(-1)).reshape(-1, 3)
+        self.assertLess(np.abs(f_int - f_k).max() / np.abs(f_k).max(), 1e-10)
+
+    def test_per_element_orientation_reaches_the_rate_damping(self):
+        per_element = np.broadcast_to(self.quarter_turn,
+                                      (len(self.mesh["elements"]), 3, 3)).copy()
+        model = self._build(fmat.KelvinVoigt(self.carbon, 1e-4),
+                            orientation=per_element)
+        c_mat = fes.assemble_rate_damping(model)
+        self.assertIsNotNone(c_mat)
+        k_mat = fes.assemble_stiffness(model)
+        # C = tau K exactly, orientation and all
+        self.assertLess(np.abs(c_mat - 1e-4 * k_mat).max()
+                        / np.abs(k_mat).max(), 1e-12)
+
+    def test_a_material_without_a_constant_tangent_is_refused_by_that_path(self):
+        class Stateful(fmat.Material):
+            name, rho, constant_tangent, n_history = "stateful", 1.0, False, 2
+
+        with self.assertRaises(ValueError):
+            fes.element_tangents(self._build(Stateful()))
+
+    def test_a_bad_orientation_is_rejected(self):
+        with self.assertRaises(ValueError):
+            fes.assemble_stiffness(self._build(self.carbon,
+                                               orientation=np.full((3, 3), 0.5)))
+        with self.assertRaises(ValueError):
+            self._build(self.carbon, orientation=np.eye(4)[:3])
+
+    def test_mat_id_must_index_the_material_list(self):
+        ids = np.zeros(len(self.mesh["elements"]), dtype=np.int64)
+        ids[0] = 5
+        with self.assertRaises(ValueError):
+            fes.build_model(self.mesh["nodes"], self.mesh["elements"],
+                            fmat.IsotropicElastic(**ALU), mat_id=ids)
+
+
+class TestMeshBuilders(unittest.TestCase):
+
+    def test_merge_meshes_offsets_connectivity_and_sets(self):
+        one = fem_mesh.box_mesh(1.0, 1.0, 1.0, 1, 1, 1)
+        two = fem_mesh.box_mesh(1.0, 1.0, 1.0, 1, 1, 1, origin=(2.0, 0.0, 0.0))
+        merged = fem_mesh.merge_meshes(one, two)
+        self.assertEqual(len(merged["nodes"]), 16)
+        self.assertEqual(len(merged["elements"]), 2)
+        self.assertEqual(merged["elements"].max(), 15)
+        self.assertIn("1:x_min", merged["node_sets"])
+        self.assertTrue(np.all(merged["node_sets"]["1:x_min"] >= 8))
+        model = fes.build_model(merged["nodes"], merged["elements"],
+                                fmat.IsotropicElastic(**ALU))
+        self.assertAlmostEqual(fes.mass_properties(model)["volume"], 2.0,
+                               places=12)
+
+    def test_plate_wing_sets_are_where_they_claim(self):
+        chord, span = 1.0, 4.0
+        plate = fem_mesh.plate_wing_mesh(chord, span, 0.05, 4, 4, 1)
+        nodes = plate["nodes"]
+        sets = plate["node_sets"]
+        self.assertLess(np.abs(nodes[sets["root"], 1]).max(), 1e-12)
+        self.assertAlmostEqual(nodes[sets["tip_max"], 1].min(), 0.5 * span,
+                               places=12)
+        self.assertAlmostEqual(nodes[sets["tip_min"], 1].max(), -0.5 * span,
+                               places=12)
+        # the default x_offset puts the QUARTER CHORD at the origin, matching
+        # the sections make_thick_sample_inputs builds
+        self.assertAlmostEqual(nodes[sets["leading"], 0].max(), -0.25 * chord,
+                               places=12)
+        self.assertAlmostEqual(nodes[sets["trailing"], 0].min(), 0.75 * chord,
+                               places=12)
+
+
 class TestLinearAlgebra(unittest.TestCase):
 
     def test_cholesky_solve_matches_numpy(self):
@@ -417,7 +554,7 @@ class TestSlow(unittest.TestCase):
     LENGTH, WIDTH, THICK = 1.0, 0.1, 0.02
 
     def _beam_reference(self, load):
-        e_mod, nu, rho = ALU["e_mod"], ALU["nu"], ALU["rho"]
+        e_mod, nu = ALU["e_mod"], ALU["nu"]
         inertia = self.WIDTH * self.THICK ** 3 / 12.0
         area = self.WIDTH * self.THICK
         shear = 0.5 * e_mod / (1.0 + nu)

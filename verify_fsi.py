@@ -108,23 +108,23 @@ def case_transfer(verbose=True):
         rigid[name] = float(np.abs(got - exact).max() / np.abs(exact).max())
     if verbose:
         _rule("C1 transfer conservation, solid foil lofted from the wetted surface")
-        print(f"  projection offset, matching meshes   "
+        print("  projection offset, matching meshes   "
               f"{transfer['offset_max']:.2e}")
-        print(f"  total force, panels -> fluid nodes    "
+        print("  total force, panels -> fluid nodes    "
               f"{matched['force_error_lump']:.2e}")
         print(f"  total force, fluid nodes -> structure {matched['force_error_transfer']:.2e}")
-        print(f"  total moment, panels -> fluid nodes   "
+        print("  total moment, panels -> fluid nodes   "
               f"{matched['moment_error_lump']:.2e}")
-        print(f"  virtual work, the two sides           "
+        print("  virtual work, the two sides           "
               f"{matched['work_error']:.2e}")
         print("  motion transferred exactly:")
         for name, err in rigid.items():
             print(f"    {name:<14s} {err:.2e}")
-        print(f"\n  the same fluid mesh over a FLAT PLATE structure, which the")
-        print(f"  wetted surface genuinely does not lie on:")
-        print(f"    projection offset                   "
+        print("\n  the same fluid mesh over a FLAT PLATE structure, which the")
+        print("  wetted surface genuinely does not lie on:")
+        print("    projection offset                   "
               f"{plate_transfer['offset_max']:.3e}")
-        print(f"    total force still conserved         "
+        print("    total force still conserved         "
               f"{non_matching['force_error_transfer']:.2e}")
         print("  Force survives non-matching meshes because the weights are a")
         print("  partition of unity. Moment does not: the load then acts at the")
@@ -240,22 +240,22 @@ def case_divergence(n_c=8, nspan=8, span=6.0, thickness=0.10, alpha=2.0,
 
     if verbose:
         _rule("C3 static divergence of an elastically supported wing")
-        print(f"  measured on the rigid wing by the panel method:")
+        print("  measured on the rigid wing by the panel method:")
         print(f"    dC_L/dalpha            {slope:.4f} per radian")
         print(f"    aerodynamic centre     x_ac = {x_ac:.4f} "
               f"(quarter chord at {resultants[0]['x_ref'][0]:.4f})")
         print(f"    reference area         {s_ref:.4f}")
-        print(f"  measured on the structure by the finite element model:")
+        print("  measured on the structure by the finite element model:")
         print(f"    spring centroid        x_ea = {centre[0]:.4f}")
         print(f"    eccentricity           e = {eccentricity:.4f}")
         print(f"    torsional stiffness    K_theta = {k_theta:.4f}")
-        print(f"\n  route                                q_div      ratio to classical")
+        print("\n  route                                q_div      ratio to classical")
         print(f"  classical K_theta/(S c_l,alpha e)   {q_classical:8.4f}      1.0000")
         print(f"  modal, smallest q with K - qA singular {modal['q_divergence']:6.4f}"
               f"      {modal['q_divergence'] / q_classical:.4f}")
         print(f"  Southwell extrapolation             {q_southwell:8.4f}      "
               f"{q_southwell / q_classical:.4f}")
-        print(f"\n  the fixed point approaching it:")
+        print("\n  the fixed point approaching it:")
         print("    q/q_div     max |u_z|    iterations")
         for fraction, _, deflection, iterations, converged in rows:
             flag = "" if converged else "  (did not converge)"
@@ -343,25 +343,25 @@ def case_added_mass(e_mod=2e8, rho_s=1200.0, dt=0.05, nsteps=140, verbose=True):
            "steps_per_wet_period": float(1.0 / (fitted["frequency"] * dt))}
     if verbose:
         _rule("C4 added mass in still water: the wet natural frequency")
-        print(f"  solid foil, chord 1, span 4, 12% thick, structural density "
+        print("  solid foil, chord 1, span 4, 12% thick, structural density "
               f"{rho_s:.0f},")
         print(f"  in water at {RHO_WATER:.0f}. The mass ratio is of order one, which is")
-        print(f"  the regime a partitioned scheme finds hardest.")
-        print(f"    dry frequency                          "
+        print("  the regime a partitioned scheme finds hardest.")
+        print("    dry frequency                          "
               f"{out['frequency_dry']:.5f} Hz")
-        print(f"  added mass over structural mass, three ways:")
-        print(f"    from one dmu/dt difference quotient    "
+        print("  added mass over structural mass, three ways:")
+        print("    from one dmu/dt difference quotient    "
               f"{report['ratio']:.4f}")
         print(f"    from 2D strip theory, rho pi b^2       {strip:.4f}")
         print(f"    implied by the marched wet frequency   {implied:.4f}")
-        print(f"  wet frequency:")
-        print(f"    from the difference quotient           "
+        print("  wet frequency:")
+        print("    from the difference quotient           "
               f"{out['frequency_wet_estimate']:.5f} Hz")
-        print(f"    marched and fitted on the crossings    "
+        print("    marched and fitted on the crossings    "
               f"{out['frequency_wet_marched']:.5f} Hz")
-        print(f"    ratio                                  "
+        print("    ratio                                  "
               f"{out['frequency_wet_marched'] / out['frequency_wet_estimate']:.4f}")
-        print(f"    growth rate of the envelope            "
+        print("    growth rate of the envelope            "
               f"{out['growth']:+.4f} per second")
         print(f"    {nsteps} steps at dt = {dt}, "
               f"{out['steps_per_wet_period']:.1f} per wet period")
@@ -444,7 +444,7 @@ def case_energy(e_mod=2e9, dt=0.05, nsteps=15, rho_inf=0.9, verbose=True):
         for n in range(0, len(work), max(1, len(work) // 8)):
             print(f"  {history['s'][n]:5.2f}   {work[n]:17.6e}   "
                   f"{stored[n]:16.6e}   {work[n] - stored[n]:+.2e}")
-        print(f"  largest difference, relative to the largest work: "
+        print("  largest difference, relative to the largest work: "
               f"{error.max():.2e}")
         print("  The work integral is trapezoidal in the displacement increment,")
         print("  so it is second order in the step and the residual is that,")

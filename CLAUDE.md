@@ -20,9 +20,12 @@ with them are byte-for-byte copies. `test_vendored.py` checks their SHA-256
 against `fluid_manifest.txt` and fails if one is edited. **Never fix the fluid
 code here.** Fix it upstream, re-vendor, regenerate the manifest with
 `python3 test_vendored.py --write`, and update the commit reference in
-`docs/FLUID.md` in the same commit. Read that repository's `DESIGN.md`,
-`UNSTEADY.md` and `ARCHITECTURE.md` before touching anything that talks to the
-fluid; they record why several things that look like accidents are not.
+`docs/FLUID.md` in the same commit. Those three files' own documents are vendored
+alongside them in `docs/fluid/` and are covered by the same manifest: read
+`docs/fluid/DESIGN.md` before changing anything that touches a sign,
+`docs/fluid/UNSTEADY.md` before anything that touches the wake or dmu/dt, and
+`docs/fluid/ARCHITECTURE.md` before anything that touches the solver API. They
+record why several things that look like accidents are not.
 
 ## Authoritative documents
 

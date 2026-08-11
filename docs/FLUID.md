@@ -25,9 +25,22 @@ and the coupling.
 | `verify_analytic.py` | cylinder and Joukowski |
 | `verify_unsteady.py` | added mass, steady limit, Wagner, Theodorsen |
 
-Their own documents, `DESIGN.md`, `ARCHITECTURE.md` and `UNSTEADY.md`, are not
-copied: they belong to the upstream repository and are cited from
-[FEM.md](FEM.md) and [COUPLING.md](COUPLING.md) by name. Read them there.
+The fluid solver's own documents are vendored as well, in
+[fluid/](fluid/), and are covered by the same manifest:
+
+| file | role |
+| --- | --- |
+| `docs/fluid/DESIGN.md` | the steady formulation and every sign convention |
+| `docs/fluid/UNSTEADY.md` | the time-dependent formulation and the shedding scheme |
+| `docs/fluid/ARCHITECTURE.md` | the fluid block boundaries and public signatures |
+| `docs/fluid/README.md` | the fluid solver's own usage guide |
+
+They are copied rather than linked for the same reason the code is: this
+repository should carry the authority for the physics it runs, not a URL to it.
+`docs/fluid/INDEX.md` is written here, is NOT vendored, and records the two
+wrinkles of reading those documents from this repository - the README's
+relative links assume a different root, and the architecture document describes
+this repository as future work.
 
 ## Why copy rather than depend
 

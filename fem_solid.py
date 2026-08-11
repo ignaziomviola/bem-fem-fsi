@@ -472,7 +472,7 @@ def internal_force(model, u, v=None, history=None, dt=None):
         v_e = np.asarray(v, dtype=float).reshape(-1)[edof]
         alpha_v = element_alpha(model, v_e, d_all, k_aa_inv)
         rate = element_strain(model, v_e, alpha_v)
-    n_e, n_g = eps.shape[0], eps.shape[1]
+    n_g = eps.shape[1]
     stress = np.empty_like(eps)
     new_hist = None if history is None else np.array(history, dtype=float)
     for m_id, mat in enumerate(model["materials"]):
@@ -910,8 +910,8 @@ def main():
     n_l = int(input("elements along the length [16]: ") or 16)
 
     mesh = fem_mesh.box_mesh(length, width, thick, n_l, 2, 2)
-    material = fem_materials_isotropic(e_mod, 0.3, rho)
-    model = build_model(mesh["nodes"], mesh["elements"], material)
+    model = build_model(mesh["nodes"], mesh["elements"],
+                        fmat.IsotropicElastic(e_mod, 0.3, rho))
     sstate = init_state(model)
     clamp(sstate, mesh["node_sets"]["x_min"])
     assemble_operators(sstate)
@@ -926,23 +926,27 @@ def main():
     beam = tip * length ** 3 / (3.0 * e_mod * inertia)
     print(f"\ntip deflection      {sstate['u'][tip_nodes, 2].mean():+.6e} m")
     print(f"Euler-Bernoulli     {beam:+.6e} m")
-    freq, _ = modes(sstate, 3)
-    coeff = (1.875104, 4.694091, 7.854757)
+    # the FLAPWISE modes, selected by their shape. A cantilever of this
+    # section has an edgewise mode between the first and the second flapwise
+    # one - at (width/thick) times the first flapwise frequency - so taking the
+    # first three eigenvalues compares the wrong things.
+    freq, shapes = modes(sstate, 12)
     area = width * thick
-    for n, (f, b) in enumerate(zip(freq, coeff), start=1):
-        exact = b ** 2 / (2.0 * np.pi) * np.sqrt(e_mod * inertia
-                                                 / (rho * area * length ** 4))
-        print(f"mode {n}: {f:9.4f} Hz   Euler-Bernoulli {exact:9.4f} Hz")
+    scale = np.sqrt(e_mod * inertia / (rho * area * length ** 4)) / (2.0 * np.pi)
+    flap = [j for j in range(len(freq))
+            if np.abs(shapes[tip_nodes, 2, j]).mean()
+            > 3.0 * np.abs(shapes[tip_nodes, 1, j]).mean()]
+    print("\nflapwise modes:")
+    for n, (j, beta) in enumerate(zip(flap, (1.875104, 4.694091, 7.854757)),
+                                  start=1):
+        exact = beta ** 2 * scale
+        print(f"  mode {n}: {freq[j]:9.4f} Hz   Euler-Bernoulli "
+              f"{exact:9.4f} Hz   ratio {freq[j] / exact:.4f}")
 
     import matplotlib.pyplot as plt
     plot_deformed(model, sstate["u"], scale=0.2 * length
                   / max(abs(sstate["u"]).max(), 1e-30))
     plt.show()
-
-
-def fem_materials_isotropic(e_mod, nu, rho):
-    """Convenience shim so main() reads without a second import alias."""
-    return fmat.IsotropicElastic(e_mod, nu, rho)
 
 
 if __name__ == "__main__":
