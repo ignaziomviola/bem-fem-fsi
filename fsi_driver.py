@@ -48,6 +48,7 @@ import fsi_transfer as fsx
 TOL_COUPLING = 1e-6         # relative displacement residual of the fixed point
 MAX_SUB = 25                # subiterations per time step
 OMEGA_START = 0.3           # first-iteration relaxation, before any history
+OMEGA_MAX = 1.0e3           # blow-up guard on the Aitken factor, not a limiter
 IQN_REUSE = 8               # columns kept in the IQN-ILS least-squares system
 STEP_WARN_CHORDS = 0.5      # fluid resolution: chords convected per step
 STEPS_PER_PERIOD_WARN = 10  # structural resolution: steps per softest period
@@ -92,8 +93,13 @@ class FixedPointAccelerator:
                 den = float(d_r @ d_r)
                 if den > 0.0:
                     self.omega = -self.omega * float(self.r_prev @ d_r) / den
-                    self.omega = float(np.clip(self.omega, -2.0, 2.0))
-                    if abs(self.omega) < 1e-6:
+                    # a magnitude guard against a degenerate denominator, NOT a
+                    # limiter: the optimal factor for a fixed point whose
+                    # dominant eigenvalue is lambda is 1/(1 - lambda), which is
+                    # 50 at lambda = 0.98, so clipping to a small range removes
+                    # exactly the acceleration Aitken exists to supply
+                    self.omega = float(np.clip(self.omega, -OMEGA_MAX, OMEGA_MAX))
+                    if abs(self.omega) < 1e-6 or not np.isfinite(self.omega):
                         self.omega = self.omega0
             self.r_prev = r
             return (u_f + self.omega * r).reshape(shape)
@@ -457,6 +463,96 @@ def added_mass_ratio(fluid, sstate, transfer, rho, dt, amplitude=None):
             "frequency_dry": float(freq[0]),
             "frequency_wet_estimate": float(freq[0]) / np.sqrt(
                 max(1.0 + -modal_force / max(modal_mass, 1e-300), 1e-30))}
+
+
+def aerodynamic_stiffness(fluid, sstate, transfer, rho, nmodes=4, amplitude=None):
+    """Reduced aerodynamic stiffness on the softest modes. (m, m)
+
+    The static aeroelastic problem is linear in the displacement while the
+    deflections are small, so it is (K - q A) u = q f_0 with A the derivative
+    of the load with respect to the displacement divided by the dynamic
+    pressure. A is measured here by one steady fluid solve per mode - m + 1
+    solves in all, not one per degree of freedom - and reduced onto the modal
+    basis, which is enough to locate a divergence because divergence is a
+    property of the softest few modes by definition.
+
+    Returns (A_r (m, m), K_r (m, m), modes (m,), shapes) with K_r = Phi^T K Phi.
+    """
+    if sstate["K"] is None:
+        fes.assemble_operators(sstate)
+    freq, phi = fes.modes(sstate, nmodes)
+    points0 = np.array(fluid["panels"]["points"])
+    q_dyn = 0.5 * rho * fluid["u_ref"] ** 2
+    scale = amplitude or (1e-3 * float(np.linalg.norm(
+        np.ptp(points0.reshape(-1, 3), axis=0))))
+    fluid = tpw.update_points(fluid, points0)
+    fluid = tpw.solve(fluid, wake="relax" if fluid["wake"] is not None else "none")
+    f_0, _ = _loads_on_structure(fluid, transfer, rho)
+    a_cols = []
+    for j in range(nmodes):
+        step = scale / max(np.abs(phi[:, :, j]).max(), 1e-300)
+        fluid = tpw.update_points(
+            fluid, fsx.displaced_points(transfer, points0, step * phi[:, :, j]))
+        fluid = tpw.solve(fluid, wake="frozen" if fluid["wake"] is not None
+                          else "none")
+        f_j, _ = _loads_on_structure(fluid, transfer, rho)
+        # f = q A u with u = step * phi_j, so A phi_j = (f_j - f_0)/(q * step)
+        a_cols.append((f_j - f_0).reshape(-1) / (q_dyn * step))
+    fluid = tpw.update_points(fluid, points0)
+    fluid = tpw.solve(fluid, wake="frozen" if fluid["wake"] is not None
+                      else "none")
+    basis = phi.reshape(-1, nmodes)
+    a_red = basis.T @ np.stack(a_cols, axis=1)
+    k_red = basis.T @ (sstate["K"] @ basis)
+    return {"A": a_red, "K": k_red, "frequency": freq, "shapes": phi,
+            "f0": basis.T @ f_0.reshape(-1)}
+
+
+def divergence_pressure(fluid, sstate, transfer, rho, nmodes=4, amplitude=None):
+    """Smallest dynamic pressure at which the static coupled operator is singular.
+
+    Divergence is the loss of positive definiteness of K - q A, so it is the
+    smallest positive eigenvalue of K_r x = q A_r x on the modal basis. This is
+    a prediction from two independently measured operators - the structure's
+    own stiffness and one aerodynamic derivative per mode - and the fixed-point
+    iteration of `static_aeroelastic` approaching the same number from below is
+    what makes the pair a verification rather than a definition.
+    """
+    red = aerodynamic_stiffness(fluid, sstate, transfer, rho, nmodes, amplitude)
+    # posed as K_r^-1 A_r x = (1/q) x rather than A_r^-1 K_r x = q x: K_r is
+    # positive definite by construction and A_r need not even be invertible
+    vals = np.linalg.eigvals(np.linalg.solve(red["K"], red["A"]))
+    real = vals[np.abs(vals.imag) < 1e-6 * np.maximum(np.abs(vals.real), 1e-30)]
+    positive = np.sort(real.real[real.real > 0.0])[::-1]
+    red["q_divergence"] = float(1.0 / positive[0]) if len(positive) else np.inf
+    red["u_divergence"] = (np.sqrt(2.0 * red["q_divergence"] / rho)
+                           if np.isfinite(red["q_divergence"]) else np.inf)
+    return red
+
+
+def growth_rate(t, signal, skip=0.25):
+    """Exponential growth rate and frequency of a decaying or growing response.
+
+    Fitted to the peaks of the signal over its last (1 - skip) portion, which
+    keeps the starting transient out. A positive rate is an instability. This
+    is the measurement a flutter boundary is read from; it says nothing about
+    which mode is responsible, which is what the modal content of the record is
+    for.
+    """
+    t = np.asarray(t, dtype=float)
+    y = np.asarray(signal, dtype=float)
+    start = int(skip * len(t))
+    t, y = t[start:], y[start:] - np.mean(y[start:])
+    peaks = [i for i in range(1, len(y) - 1)
+             if abs(y[i]) > abs(y[i - 1]) and abs(y[i]) >= abs(y[i + 1])]
+    if len(peaks) < 3:
+        return {"rate": np.nan, "frequency": np.nan, "peaks": len(peaks)}
+    t_p, y_p = t[peaks], np.abs(y[peaks])
+    good = y_p > 1e-14 * max(y_p.max(), 1e-300)
+    slope, _ = np.polyfit(t_p[good], np.log(y_p[good]), 1)
+    period = 2.0 * np.mean(np.diff(t_p))
+    return {"rate": float(slope), "frequency": float(1.0 / period),
+            "peaks": len(peaks)}
 
 
 # ----------------------------------------------------------- 6 plotting
