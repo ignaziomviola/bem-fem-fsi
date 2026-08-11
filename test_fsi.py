@@ -412,6 +412,42 @@ class TestSlow(unittest.TestCase):
         self.assertTrue(diverged, "loose coupling survived at an added-mass "
                                   "ratio above one, which it should not")
 
+    def test_the_wet_frequency_matches_the_added_mass_ratio(self):
+        """Two routes to the same number: one perturbation of the doublet
+        strengths, and a marched oscillation fitted on its zero crossings.
+
+        Run without a wake, which is the correct model for added mass - the
+        fluid repository's own sphere gate has none either - and also the only
+        stable one in still water, where there is no mean flow to carry shed
+        vorticity away from the trailing edge.
+        """
+        points = small_wing(alpha=0.0)
+        mesh = fem_mesh.solid_foil_mesh(points, n_thick=1)
+        model = fes.build_model(mesh["nodes"], mesh["elements"],
+                                fmat.IsotropicElastic(2e8, 0.3, 1200.0))
+        fluid, sstate, transfer = fsd.init_fsi(points, still_fluid, model,
+                                               u_ref=1.0, rho=1000.0,
+                                               config={"lifting": False})
+        fes.clamp(sstate, mesh["node_sets"]["root"])
+        fes.assemble_operators(sstate)
+        report = fsd.added_mass_ratio(fluid, sstate, transfer, 1000.0, 0.05)
+        self.assertGreater(report["ratio"], 1.0)
+        freq, phi = fes.modes(sstate, 1)
+        sstate["u"] = phi[:, :, 0] * (0.005 / np.abs(phi[:, :, 0]).max())
+        f_struct, _ = fsd._loads_on_structure(fluid, transfer, 1000.0)
+        sstate["a"] = fes.initial_acceleration(sstate, f_struct)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            history, _, _ = fsd.time_march_fsi(fluid, sstate, transfer, dt=0.05,
+                                               nsteps=140, rho=1000.0,
+                                               rho_inf=0.9, max_sub=30)
+        fitted = fsd.growth_rate(history["t"], history["tip_z"], skip=0.05)
+        self.assertAlmostEqual(fitted["frequency"]
+                               / report["frequency_wet_estimate"], 1.0,
+                               delta=0.05)
+        # no wake means no radiation damping: the envelope must be neutral
+        self.assertLess(abs(fitted["rate"]), 0.05 * fitted["frequency"])
+
     def test_energy_balance_of_the_coupled_system(self):
         """Work done by the fluid = strain energy + kinetic energy, in vacuo-free
         form, to the accuracy of the trapezoidal work integral."""

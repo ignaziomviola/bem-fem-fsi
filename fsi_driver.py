@@ -550,9 +550,20 @@ def growth_rate(t, signal, skip=0.25):
     t_p, y_p = t[peaks], np.abs(y[peaks])
     good = y_p > 1e-14 * max(y_p.max(), 1e-300)
     slope, _ = np.polyfit(t_p[good], np.log(y_p[good]), 1)
-    period = 2.0 * np.mean(np.diff(t_p))
+    # the frequency comes from the zero crossings, linearly interpolated, and
+    # not from the peak spacing: a peak sits at a stationary point, so its
+    # position is only as accurate as the step, while a crossing is where the
+    # signal moves fastest and interpolating it is accurate to second order
+    sign_change = np.where(np.diff(np.sign(y)) != 0)[0]
+    if len(sign_change) >= 3:
+        zeros = t[sign_change] - y[sign_change] \
+            * (t[sign_change + 1] - t[sign_change]) \
+            / (y[sign_change + 1] - y[sign_change])
+        period = 2.0 * float(np.mean(np.diff(zeros)))
+    else:
+        period = 2.0 * float(np.mean(np.diff(t_p)))
     return {"rate": float(slope), "frequency": float(1.0 / period),
-            "peaks": len(peaks)}
+            "peaks": len(peaks), "crossings": int(len(sign_change))}
 
 
 # ----------------------------------------------------------- 6 plotting
@@ -611,7 +622,7 @@ def main():
     span = float(input("span [6.0]: ") or 6.0)
     thickness = float(input("thickness/chord [0.12]: ") or 0.12)
     alpha = float(input("incidence, degrees [5.0]: ") or 5.0)
-    e_mod = float(input("Young's modulus [2.0e7]: ") or 2.0e7)
+    e_mod = float(input("Young's modulus [2.0e8]: ") or 2.0e8)
     rho_s = float(input("structural density [1200.0]: ") or 1200.0)
     rho_f = float(input("fluid density [1000.0]: ") or 1000.0)
     dt = float(input("time step [0.05]: ") or 0.05)
@@ -638,10 +649,26 @@ def main():
           f"({transfer['offset_rel']:.1e} of the bounding box)")
     freq, _ = fes.modes(sstate, 3)
     print("dry frequencies: " + ", ".join(f"{f:.4f} Hz" for f in freq))
+    ratio = added_mass_ratio(fluid, sstate, transfer, rho_f, dt)
+    print(f"added mass / structural mass {ratio['ratio']:.3f}, so the wet "
+          f"frequency is near {ratio['frequency_wet_estimate']:.4f} Hz")
+    print(f"{steps_per_period(sstate, dt):.1f} steps per dry structural period "
+          f"and {usw.convection_per_step(fluid, dt):.3f} chords convected per step")
 
+    # start from the static aeroelastic equilibrium rather than from rest: a
+    # structure released from rest rings in every mode it has, including the
+    # ones the step cannot resolve, and their acceleration reaches the pressure
+    # through dmu/dt. This is the first of the two cures docs/COUPLING.md gives.
+    print("\nstatic aeroelastic equilibrium:")
+    fluid, sstate, static = static_aeroelastic(fluid, sstate, transfer,
+                                               rho=rho_f, verbose=True)
+    print(f"  {'converged' if static['converged'] else 'DID NOT CONVERGE'} in "
+          f"{static['iterations']} iterations")
+
+    print("\ncoupled time march:")
     history, fluid, sstate = time_march_fsi(fluid, sstate, transfer, dt=dt,
                                             nsteps=nsteps, rho=rho_f,
-                                            verbose=True)
+                                            rho_inf=0.9, verbose=True)
     print(f"\nfinal C_L {history['CL'][-1]:+.5f}, "
           f"largest displacement {history['tip'][-1]:.5e}, "
           f"mean subiterations {history['sub'][1:].mean():.2f}")

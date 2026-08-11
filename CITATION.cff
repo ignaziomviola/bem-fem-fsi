@@ -1,0 +1,53 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "fsi-bem-fem: a free-wake panel method coupled to a three-dimensional finite element solid"
+abstract: >-
+  A Python code computing the unsteady loads on a deformable finite wing in
+  incompressible flow and the deformation those loads produce. The fluid is a
+  free-wake source-doublet panel method that sheds one wake strip per time step
+  and convects it as material fluid, so the added mass is predicted by the
+  unsteady Bernoulli relation rather than modelled. The structure is a
+  three-dimensional finite element solid of eight-node hexahedra with
+  incompatible modes, in which stress and tangent modulus are evaluated at each
+  Gauss point by a material object, so anisotropic and inelastic materials
+  extend the code rather than rewrite it; isotropic elasticity, orthotropic
+  elasticity and Kelvin-Voigt viscoelasticity are provided. The two solvers are
+  coupled by a partitioned scheme whose interface conserves force, moment and
+  virtual work to round-off and reproduces rigid-body motion exactly,
+  accelerated by Aitken relaxation or IQN-ILS, strongly enough for water, where
+  the added mass exceeds the structural mass and a staggered scheme has no
+  stable step size. The panel method is carried in verbatim from its own
+  repository and is not modified here.
+type: software
+authors:
+  - family-names: Viola
+    given-names: Ignazio Maria
+    affiliation: "University of Edinburgh"
+    email: i.m.viola@ed.ac.uk
+license: MIT
+repository-code: "https://github.com/ignaziomviola/fsi-bem-fem"
+date-released: 2026-08-11
+keywords:
+  - fluid-structure interaction
+  - finite element method
+  - panel method
+  - potential flow
+  - unsteady aerodynamics
+  - free wake
+  - added mass
+  - aeroelasticity
+  - hydroelasticity
+  - partitioned coupling
+references:
+  - type: software
+    title: "time-dependent-free-wake-panel-method: an unsteady free-wake source-doublet panel method for finite wings with thickness"
+    authors:
+      - family-names: Viola
+        given-names: Ignazio Maria
+    repository-code: "https://github.com/ignaziomviola/time-dependent-free-wake-panel-method"
+  - type: software
+    title: "free-wake-thick-panel-method: a free-wake source-doublet panel method for finite wings with thickness"
+    authors:
+      - family-names: Viola
+        given-names: Ignazio Maria
+    repository-code: "https://github.com/ignaziomviola/free-wake-thick-panel-method"
