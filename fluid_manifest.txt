@@ -1,0 +1,12 @@
+# SHA-256 of the files vendored verbatim from
+# https://github.com/ignaziomviola/time-dependent-free-wake-panel-method
+# commit d9d1f657e9191cf57959558685a4f06b3b46923c
+# Regenerate with: python3 test_vendored.py --write
+f9eb0cdcbd81c7d553997828dc535856e19f12bda15884fca80bafccd28cc8b0  thick_panel_wing.py
+d890109f96ad731e62ef4854defe45c688f66e9c45bd8af4aad0247fe6891841  unsteady_wing.py
+ee87debc48a83a8bc5fc73a5d5a2bc76b3a367906a1efb80bc53414e66dc32b6  freewake_kernels.py
+e09f1b60578e3688bc76908567ae2de3ac8b8baede316dbb25a3d719b4db6225  make_thick_sample_inputs.py
+abb602a63be8df3c8e6a14fd7676846c928f0d57fbb8a5c3f76f2e8a73f4e65d  test_thick_panel_wing.py
+70bb6530561a2c04e07083cbfeaa636f795761118d42bfe85ab609495e1d1d80  test_unsteady_wing.py
+b8636812d073ed40659a02319909b8a58db6a07e88107454f7e9b83b611cd58a  verify_analytic.py
+9a8233a87f54d66c5698d71a1548f4a4d3d82f5122170ae0f8a66e2b289c0d9f  verify_unsteady.py

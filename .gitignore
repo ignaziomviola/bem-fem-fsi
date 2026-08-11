@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+
+# Sample meshes and profiles: regenerate with make_thick_sample_inputs.py
+*.npz
+*.csv
+
+# Figures
+*.png
+*.pdf
+
+.DS_Store
+.venv/
