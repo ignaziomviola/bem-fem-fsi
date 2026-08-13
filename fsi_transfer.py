@@ -111,7 +111,7 @@ def project_to_quads(points, corners, clamp=True):
 
 # ------------------------------------------------------------ 2 operator
 
-def build_transfer(fluid_state, model, candidates=CANDIDATES):
+def build_transfer(fluid_state, model, candidates=CANDIDATES, iface=None):
     """Interpolation operator from structural nodes to fluid mesh nodes.
 
     Built ONCE, on the two reference configurations, and used unchanged for
@@ -119,10 +119,22 @@ def build_transfer(fluid_state, model, candidates=CANDIDATES):
     coupling residual a fixed linear function of the structural state, which
     quasi-Newton acceleration requires.
 
+    iface overrides `tpw.interface(fluid_state)` and the mesh shape taken from
+    it, for the case where the structure faces only PART of the fluid mesh. The
+    doubled mesh of a surface-piercing strut is that case: its image half has no
+    structural counterpart, so the transfer is built on the immersed half alone
+    and the image geometry is slaved by mirroring, which is a fixed linear map
+    and so leaves the build-once property intact. `vent_mesh.half_interface`
+    supplies it, and supplies a weld map that welds the deep tip only -
+    `build_topology` welds both end stations, which on the half mesh would weld
+    the upper- and lower-surface waterline nodes to each other and collapse the
+    open root. fluid_state is then unused except as the default.
+
     Returns a dict with `rows` (M, 4) structural node indices, `weights`
     (M, 4), the fluid mesh `shape`, the `weld_map`, and the offset diagnostic.
     """
-    iface = tpw.interface(fluid_state)
+    iface = tpw.interface(fluid_state) if iface is None else iface
+    shape = iface.get("shape", fluid_state["panels"]["points"].shape)
     x_f = iface["nodes"]
     weld = iface["weld_map"]
     faces = model["faces"]
@@ -164,7 +176,7 @@ def build_transfer(fluid_state, model, candidates=CANDIDATES):
 
     scale = float(np.linalg.norm(np.ptp(x_f, axis=0)))
     return {"rows": rows, "weights": weights, "weld_map": weld,
-            "shape": fluid_state["panels"]["points"].shape,
+            "shape": shape,
             "n_struct": len(x_s), "offset": projected - x_f,
             "offset_max": float(np.abs(best_d).max()),
             "offset_rel": float(np.abs(best_d).max() / max(scale, 1e-30))}

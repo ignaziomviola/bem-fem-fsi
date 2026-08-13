@@ -29,11 +29,16 @@ fem_solid.py         the structural physics, ten sections
 fem_mesh.py          structural mesh builders
 fsi_transfer.py      the two interface operators
 fsi_driver.py        the static and time-marched coupling, and the CLI
+vent_section.py      sectional cavity physics; imports nothing from here
+vent_mesh.py         the doubled surface-piercing strut, and the mirror maps
+vent_cavity.py       cavity extent, inception, the regime state machine
+vent_loads.py        the cavity pressure and the immersed-half load path
+vent_solve.py        the image, the mixed-unknown system, the cavity fixed point
 ```
 
-`fem_*` is the structure and `fsi_*` the coupling, so the eight vendored fluid
-files at the repository root stay visually distinct from what is maintained
-here. Nothing imports downward:
+`fem_*` is the structure, `fsi_*` the coupling and `vent_*` the ventilation
+closure model, so the eight vendored fluid files at the repository root stay
+visually distinct from what is maintained here. Nothing imports downward:
 
 ```
 fem_materials  <-  fem_solid  <-  fem_mesh (builders only)
@@ -148,6 +153,46 @@ factor of the effective operator is the expensive object; it is reused across
 every step and every coupling subiteration and invalidated by a change of dt,
 of the integrator parameters, of the operators or of the constraints.
 
+## The ventilation state contract
+
+`docs/VENTILATION.md` owns the physics; what belongs here is which entries change
+and when.
+
+```python
+vent = {                            # built once by build_vent
+  # parameters, never changed
+  "y_fs", "h", "chord", "ar", "u_ref", "fn_h", "dsigma", "g", "gamma_st", "rho",
+  "alpha_rad", "alpha_stall", "recovery", "growth_chords", "closure",
+  "extent_rule", "length_model", "sub_tol", "sub_max", "sub_omega",
+  "x_ref": (3,),                    # FIXED once; see below
+  # geometry, built once
+  "image": bool, "n_half", "waterline_j", "shape_full", "shape_half",
+  "node_mirror": (M,), "panel_mirror": (N,), "node_real": (Mh,),
+  "real_mask": (N,), "image_mask": (N,), "wake_col_mirror", "wake_strip_mirror",
+  "points_half_ref": (nwrap+1, n_half+1, 3),
+  # the TIME LEVEL: advances only in commit_vent
+  "regime": 'FW'|'PV'|'FV', "l_c": (nspan,), "detach": (nspan,),
+  "weight": (N,), "d_cav", "phi_bar", "step", "time", "transitions", "drift_y",
+}
+```
+
+**Two entries need justifying.**
+
+`x_ref` is fixed at construction rather than left to `integrate_loads`, which
+locates its own moment reference by a max-distance search on the mid-span
+section. On a doubled mesh that section is the waterline, and the search re-runs
+on every deflected geometry, so the yawing moment would acquire a spurious drift.
+
+Everything a coupling subiteration computes - the pressures, the cavity mask, the
+thickness, the closure line, the residual - lives in a `cav` dictionary returned
+inside `loads["cav"]` and is discarded. Nothing that changes within a
+subiteration is stored in `vent`. That, plus cold-starting the cavity iteration
+from the committed length, is what keeps the coupled load a deterministic
+function of the displacement and the committed regime, which the quasi-Newton
+acceleration requires. The gate is one cheap test: evaluate the load twice from
+the same committed state at the same displacement and assert the two nodal force
+arrays are bit-identical.
+
 ## Public signatures
 
 ### fem_solid, sections 3 to 6
@@ -251,6 +296,88 @@ aerodynamic_stiffness(fluid, sstate, transfer, rho, nmodes=4, ...) -> dict
 divergence_pressure(fluid, sstate, transfer, rho, nmodes=4, ...) -> dict
 growth_rate(t, signal, skip=0.25) -> {"rate", "frequency", "peaks"}
 plot_fsi_history(history, save=None) -> Figure
+
+init_vent_fsi(points, onset, model, h, chord, ..., image=True, **vent_kw)
+                                     -> (fluid, sstate, transfer, vent)
+ventilation_margin(fluid, vent, rho) -> dict     # how close to inception
+```
+
+Every ventilated path is behind one optional `vent=None` argument on
+`static_aeroelastic`, `time_march_fsi`, `added_mass_ratio`,
+`aerodynamic_stiffness` and `divergence_pressure`; with it None, the code is the
+pre-existing code verbatim, which `test_vent.TestBaseline` asserts bit-for-bit.
+Three private helpers carry the whole intrusion: `_reference_points` returns the
+array the transfer was built on, `_geometry` lifts a displaced half to the
+doubled mesh, and `_solve_fluid` dispatches between the vendored solve and the
+image-antisymmetric one.
+
+### vent_section
+
+```python
+sigma_cavity(depth, h, fn_h, dsigma=0.0) -> array      # (1.10), (1.12)
+froude_h(u, h, g) -> float;  weber(u, chord, rho, gamma) -> float
+psi(sigma_c, alpha_2d) -> array
+acosta_psi(L) / acosta_length(psi) / acosta_lift_slope(L)      # (1.6), exact
+tulin_length(psi, alpha_2d) / tulin_psi(L)                     # (1.5), exact
+harwood_length(psi) / harwood_length_low_order(psi)            # (1.7), (1.8)
+cavity_length(psi, model='exact'|'fit'|'low', alpha_2d=0.0) -> array
+lift_slope(L) -> array                                         # (1.9)
+centre_of_pressure(L) -> array                                 # (3.4)
+jet_speed(u, sigma_c) / jet_components(u, sigma_c, phi)         # (3.1), (3.2)
+closure_angle(depth, x_closure) -> (phi_bar, phi_local)
+unstable_closure(phi_bar) -> bool;  regime(D, phi_bar, h) -> str
+helmbold(a0, ar) / elliptic_shape(kappa) / lift_weighted_slope(ar)
+washout_froude(cl, ar_h) / washout_froude_chain(cl, ar_h)      # (4.5), (4.1-4.4)
+breslin_skalak(cl) / washout_margin(fn_h, cl, ar_h)            # (1.2)
+```
+
+### vent_mesh
+
+```python
+strut_mesh(n_c, nspan_half, h, chord, ..., image=True) -> points
+symmetrise_points(points, y_fs) / symmetry_residual(points, y_fs)
+mirror_maps(shape_full, y_fs=0.0, image=True) -> maps
+half_points(points_full, maps) / complete_points(points_half, maps)
+complete_vectors(v_half, maps) / mirror_scalar(field, maps, sign=-1.0)
+half_interface(points_half) -> dict          # for build_transfer(iface=...)
+symmetrise_wake(wake, maps) -> {"drift_y", "drift_max", "mu_residual"}
+strut_solid_mesh(points_half, ...) -> mesh
+```
+
+### vent_cavity
+
+```python
+build_vent(maps, points_half, h, chord, u_ref, alpha_rad, ...) -> vent
+commit_vent(vent, cav, t=None, dt=None) -> vent      # the ONLY mutation
+transition(vent, cav) -> (regime, why)               # called only from commit
+set_regime(vent, regime) / freeze(vent) / inject(vent, station=None)
+panel_depth(pan, y_fs) / suction_side(pan, alpha_rad) / chordwise_frame(pan)
+wrap_extent(pan, frame) / wrap_spacing(pan, a, b) / cavity_interior(pan, weight)
+mask_from_lengths(pan, frame, lengths, alpha_rad, real_mask, detach)
+pressure_target(...) -> (detach, length);  section_target(...) -> length
+thickness(...) / closure_thickness(...) / closure_residual(...) / entrainment(...)
+separated(pan, cp, alpha_rad, recovery) / air_path(pan, candidate, seed)
+waterline_band(pan, vent) / closure_geometry(pan, frame, lengths, vent)
+cavity_report(pan, frame, vent, cav) -> dict
+```
+
+### vent_loads and vent_solve
+
+```python
+cavity_cp(pan, vent) / cavity_speed(pan, vent)
+vent_pressure(pan, mu, u_rel, u_ref, vent, weight, dphi_dt, rho) -> dict
+immersed_loads(fluid, vent, p_gauge, rho) -> loads      # on s_ref = h*c
+structural_forces_half(transfer, vent, pan, force_panels) -> (Ns, 3)
+conservation_report_half(...) / depth_loading(pan, vent, p_gauge, rho)
+
+image_sigma(pan, vent, u_rel, sign=-1.0) -> (N,)
+mixed_solve(fluid, vent, sys, sigma, unknown_type, mu_fixed) -> (mu, sigma)
+solve_wetted(fluid, vent, wake='frozen', sign=-1.0) -> fluid    # replaces tpw.solve
+dynamic_mu(pan, frame, vent, weight, mu_wet, u_rel, v_span) -> (mu, v_s)
+solve_cavity(fluid, vent, rho, dphi_of_mu, wake, sign, dt) -> (fluid, cav, loads)
+relax_wake(fluid, vent, ...) / shed_and_project(fluid, vent, dt, nmax)
+antisymmetry_residual(fluid, vent, probe=None) -> dict
+washout_margin(vent, cl) / report(fluid, vent, cav, rho) -> dict
 ```
 
 ## The two resolution measures
@@ -285,6 +412,14 @@ equilibrium instead of from rest, or set `rho_inf` below one.
 | 10 | transfer built once on the reference configurations | quasi-Newton coupling | done, IQN-ILS |
 | 11 | `H` and `H^T` for the two directions | any conservative interface | done |
 | 12 | dense operators, factored once against a version stamp | a sparse or iterative solver behind the same four functions | future |
+| 13 | corner-pure, mirror-covariant kernels | free-surface image | done, by mesh doubling and a source-strength sign flip |
+| 14 | per-panel doublet/source unknown swap in `assemble_system` | cavity with prescribed pressure and solved thickness | done, `closure='dirichlet'` |
+| 15 | `ds_wrap` per panel | cavity-height integrals | done, thickness and entrainment |
+| 16 | the trailing-edge fold sends a prescribed `mu` to the right-hand side | a cavity that reaches the trailing edge | done, and needed no change |
+| 17 | `build_transfer(iface=...)` | a structure facing only part of the fluid mesh | done, the immersed half |
+| 18 | `foil_ribs(pinched=...)` | a wrap mesh with one open span end | done, the waterline root |
+| 19 | `dsigma` in the cavity pressure | vaporous cavitation, and the vaporous-to-ventilated transition | property present, behaviour future |
+| 20 | `growth_chords` rate limit on the cavity front | a transport equation for the cavity interface | property present, behaviour future |
 
 ## What the coupling extension actually cost
 
@@ -324,10 +459,11 @@ needed, adjoint included. Neither was designed for this.
 
 ## Tests
 
-`test_fem.py` (35), `test_fsi.py` (20) and `test_vendored.py` (3), on the
-standard-library unittest; pytest is not installed upstream and is not
-introduced. The convergence and coupled-physics studies are behind `FEM_SLOW=1`
-and `FSI_SLOW=1` rather than markers, following the upstream convention.
+`test_fem.py` (44), `test_fsi.py` (21), `test_vent.py` (87) and
+`test_vendored.py` (4), on the standard-library unittest; pytest is not installed
+upstream and is not introduced. The convergence, coupled-physics and coupled
+ventilation studies are behind `FEM_SLOW=1`, `FSI_SLOW=1` and `VENT_SLOW=1`
+rather than markers, following the upstream convention.
 
 `test_vendored.py` checks the SHA-256 of every vendored fluid file, so a local
 edit to the fluid solver fails the suite. The two vendored fluid suites run
@@ -340,3 +476,60 @@ two gates; element, assembly, patch test and rigid-body modes; constraints,
 factorisation, statics and eigen; the time integrator; the mesh builders; the
 transfer, gated to round-off before any coupled run existed; the static
 coupling; the time march; the verification programmes and these documents.
+
+## What the ventilation extension actually cost
+
+The upstream architecture predicted this extension too, and named four hooks for
+it. All four held. Two of its predictions needed amending, and one thing it did
+not anticipate turned out to be the load-bearing decision.
+
+1. **A mirror image cannot be convected, only projected.** The upstream sketch
+   said a free-surface image is "strictly `kernel(pts, mirror_corners(corners,
+   z_fs))` with signed factors, plus mirrored segment endpoints", and warned that
+   a driver composing image blocks must own the wake relaxation. Both are true,
+   but the reason is stronger than the warning: with `phi` antisymmetric the
+   perturbation velocity mirrors WITH a sign while the onset does not, so a
+   mirror-consistent convection would require the perturbation velocity to
+   vanish. The image wake has to be placed rather than advected, and the drift the
+   projection discards is the linearised wave elevation - a diagnostic, not an
+   error. Nothing upstream could have predicted this, because a rigid wing has no
+   image.
+2. **The image is cheaper as geometry than as blocks.** Because
+   `validate_mesh` and `update_points` both force pinched span ends, an open
+   waterline section is impossible; and because `thick_wing_mesh` with unit taper
+   already IS the doubled strut, the image needs no new kernel calls at all - only
+   a sign flip on the source strengths of the mirror half, through
+   `assemble_system`'s `sigma_fixed`. The consequence, which the sketch did not
+   note, is that on a doubled mesh the vendored `tpw.solve` returns the RIGID-WALL
+   answer bit-for-bit: the free surface is exactly one sign away from the answer a
+   caller gets by accident.
+3. **The unknown-swap masks were right, and the trailing-edge fold was already
+   correct.** `assemble_system` handles a cavity panel that is also a Kutta panel
+   without change, sending its prescribed strength to the right-hand side. That
+   case - a cavity reaching the trailing edge - is the fully ventilated regime, so
+   the hook mattered in the regime that matters most.
+4. **`ds_wrap` was documented as the cavity-height integration hook and is
+   exactly that**, but the spacing the cavity's prescribed doublet strength must
+   be integrated with is the arc-floored one the wrap stencil itself divides by,
+   not the panel extent alone and emphatically not the chordwise distance:
+   integrating along the chord puts the leading-edge panels badly wrong, because
+   there the surface tangent is nearly normal to the chord.
+
+The decision nothing upstream predicted, and the one everything else rests on, is
+that **the cavity must be parameterised by a continuous length with a fractional
+closure panel rather than by a boolean panel mask.** A boolean mask makes the load
+piecewise-constant in the displacement; the cavity then chatters between two
+adjacent panels, and IQN-ILS - which upstream provided for exactly this coupling -
+fits its least-squares system to a staircase and cannot converge below one panel
+width at any tolerance. The same reasoning applied twice more: to the growth-rate
+limit, which stops a transition being an instantaneous load step whose structural
+response measures the time step rather than the flow, and to the regime, which
+advances only on commit because bi-stable states are not functions of the
+instantaneous condition at all.
+
+The coupling extension's own cost accounting said the transfer being built once
+was what made quasi-Newton work. That is still true, and the doubled mesh nearly
+broke it: the image half has no structural counterpart, so the transfer had to be
+built on the immersed half through a new `iface` argument, with the image geometry
+slaved by a mirror map. Because that map is fixed and linear, the build-once
+property survived untouched.

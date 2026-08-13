@@ -44,6 +44,11 @@ import thick_panel_wing as tpw
 import unsteady_wing as usw
 import fem_solid as fes
 import fsi_transfer as fsx
+import vent_cavity as vcv
+import vent_loads as vnl
+import vent_mesh as vm
+import vent_section as vs
+import vent_solve as vsl
 
 TOL_COUPLING = 1e-6         # relative displacement residual of the fixed point
 MAX_SUB = 25                # subiterations per time step
@@ -52,6 +57,13 @@ OMEGA_MAX = 1.0e3           # blow-up guard on the Aitken factor, not a limiter
 IQN_REUSE = 8               # columns kept in the IQN-ILS least-squares system
 STEP_WARN_CHORDS = 0.5      # fluid resolution: chords convected per step
 STEPS_PER_PERIOD_WARN = 10  # structural resolution: steps per softest period
+FROUDE_WARN = 1.0           # the free-surface image is a HIGH-Froude
+                            # linearisation on an undeformed plane; below about
+                            # one the real free surface deforms steeply and the
+                            # discarded wake drift, which is the linearised wave
+                            # elevation, stops being small
+MARGIN_WARN = 0.1           # |washout margin| below which the ventilated regime
+                            # is metastable and a marched run will flip
 
 
 # --------------------------------------------------------- 1 acceleration
@@ -137,10 +149,121 @@ def init_fsi(points, onset, model, u_ref=1.0, rho=tpw.RHO, unsteady=True,
     return fluid, sstate, transfer
 
 
-def _loads_on_structure(fluid, transfer, rho, p_ref=None, dphi_dt=None):
-    """One fluid load evaluation, delivered as structural nodal forces."""
-    loads = tpw.get_loads(fluid, rho=rho, p_ref=p_ref, dphi_dt=dphi_dt)
-    return fsx.structural_forces(transfer, fluid["panels"], loads["force"]), loads
+def init_vent_fsi(points, onset, model, h, chord, u_ref=1.0, rho=tpw.RHO,
+                  unsteady=True, core=None, config=None, rayleigh=(0.0, 0.0),
+                  lumped_mass=False, alpha_deg=0.0, y_fs=0.0, image=True,
+                  **vent_kw):
+    """The ventilated case in one call. -> (fluid, sstate, transfer, vent)
+
+    `points` is the DOUBLED strut of `vent_mesh.strut_mesh`, and `model` the solid
+    lofted on its immersed half. The transfer is built on the immersed half alone,
+    once, through `vent_mesh.half_interface`; the image half has no structural
+    counterpart and is slaved by mirroring on every geometry update, which is a
+    fixed linear map and so leaves the build-once property intact.
+    """
+    if unsteady:
+        fluid = usw.init_unsteady_state(points, onset, u_ref, core=core,
+                                        config=config)
+    else:
+        fluid = tpw.init_state(points, onset, u_ref, config=config)
+    maps = vm.mirror_maps(points.shape, y_fs=y_fs, image=image)
+    half = vm.half_points(points, maps)
+    sstate = fes.init_state(model, rayleigh=rayleigh, lumped_mass=lumped_mass)
+    transfer = fsx.build_transfer(fluid, model, iface=vm.half_interface(half))
+    vent = vcv.build_vent(maps, half, h=h, chord=chord, u_ref=u_ref,
+                          alpha_rad=np.radians(alpha_deg), rho=rho, **vent_kw)
+    return fluid, sstate, transfer, vent
+
+
+def ventilation_margin(fluid, vent, rho=tpw.RHO):
+    """How close the present operating point is to inception. -> dict
+
+    `margin` is the smallest value of Cp - Cp_cavity over the immersed suction
+    side: negative means some panel is already below the cavity pressure and the
+    flow is ventilation-READY, which with an air path and a broken seal is
+    inception. `washout` is the signed distance from the washout boundary (4.5).
+    The diagnostic to reach for first when a ventilated run does something
+    unexpected, beside `added_mass_ratio` and `divergence_pressure`.
+    """
+    fluid, cav, loads = vsl.solve_cavity(fluid, vcv.set_regime(vent, "FW"),
+                                         rho=rho)
+    suction = vcv.suction_side(fluid["panels"], vent["alpha_rad"]) \
+        & np.asarray(vent["real_mask"], dtype=bool)
+    margin = float(np.min((cav["cp_solved"] - cav["cp_cav"])[suction]))
+    cl = loads["resultants"]["CL"]
+    return {"margin": margin, "ready": margin < 0.0,
+            "n_ready": int(cav["n_ready"]), "seal_broken": cav["seal_broken"],
+            "CL_wetted": cl, "washout_margin": vsl.washout_margin(vent, cl),
+            "fn_h": vent["fn_h"], "weber": vent["weber"],
+            "weber_ok": vent["weber"] > vs.WE_MIN,
+            "alpha_deg": np.degrees(vent["alpha_rad"]),
+            "alpha_stall_deg": np.degrees(vent["alpha_stall"])}
+
+
+def _reference_points(fluid, vent):
+    """The array the transfer was built on. -> (nwrap+1, nspan+1, 3)
+
+    The whole fluid mesh, or the IMMERSED HALF when ventilating: the image half of
+    a doubled surface-piercing strut has no structural counterpart, so the
+    transfer is built on the half and the image is slaved by mirroring.
+    """
+    return np.array(fluid["panels"]["points"]) if vent is None \
+        else np.array(vent["points_half_ref"])
+
+
+def _geometry(transfer, points0, u, v, vent):
+    """Displaced points and velocities for update_points, lifted to the image.
+
+    `complete_points` is a fixed affine map, so the transfer stays built once and
+    the coupling residual stays a fixed function of the displacement.
+    -> (points, velocities or None)
+    """
+    pts = fsx.displaced_points(transfer, points0, u)
+    vel = None if v is None else fsx.point_velocities(transfer, v)
+    if vent is not None:
+        pts = vm.complete_points(pts, vent)
+        vel = None if vel is None else vm.complete_vectors(vel, vent)
+    return pts, vel
+
+
+def _solve_fluid(fluid, vent, mode="frozen"):
+    """One fluid solve: the vendored one, or the image-antisymmetric one.
+
+    Also collapses the `'frozen' if the wake exists else 'none'` idiom that this
+    file otherwise repeats at every call site.
+    """
+    if fluid["wake"] is None:
+        mode = "none"
+    if vent is None:
+        return tpw.solve(fluid, wake=mode)
+    return vsl.solve_wetted(fluid, vent, wake=mode)
+
+
+def _loads_on_structure(fluid, transfer, rho, p_ref=None, dphi_dt=None,
+                        vent=None, dphi_of_mu=None, dt=None):
+    """One fluid load evaluation, delivered as structural nodal forces.
+
+    The only fluid load path in the coupled code, and therefore the only place a
+    ventilated load has to be taught about. When ventilating, the cavity fixed
+    point runs here and its iterate rides back inside loads['cav'], so the four
+    existing `f_struct, loads = ...` unpackings are untouched.
+    """
+    if vent is None:
+        loads = tpw.get_loads(fluid, rho=rho, p_ref=p_ref, dphi_dt=dphi_dt)
+        return fsx.structural_forces(transfer, fluid["panels"],
+                                     loads["force"]), loads
+    if p_ref is not None:
+        raise ValueError(
+            "p_ref must be None when ventilating: the cavity pressure is "
+            "referenced to the LOCAL still-water pressure, which is exactly what "
+            "the p_ref=None path already computes, so a hydrostatic p_ref would "
+            "count the hydrostatic field twice")
+    if dphi_of_mu is None and dphi_dt is not None:
+        dphi_of_mu = lambda _mu: dphi_dt                       # noqa: E731
+    fluid, cav, loads = vsl.solve_cavity(fluid, vent, rho=rho,
+                                         dphi_of_mu=dphi_of_mu, dt=dt)
+    return vnl.structural_forces_half(transfer, vent, fluid["panels"],
+                                      loads["force"]), loads
 
 
 def _level_from_u(sstate, u, dt, par):
@@ -165,7 +288,7 @@ def _level_from_u(sstate, u, dt, par):
 def static_aeroelastic(fluid, sstate, transfer, rho=tpw.RHO, p_ref=None,
                        tol=TOL_COUPLING, max_iter=MAX_SUB, accel="aitken",
                        omega=OMEGA_START, relax_wake_every=0, verbose=False,
-                       callback=None):
+                       callback=None, vent=None):
     """Steady aeroelastic fixed point. Returns (fluid, sstate, history).
 
     The loop of the fluid repository's ARCHITECTURE.md, with the acceleration
@@ -177,22 +300,32 @@ def static_aeroelastic(fluid, sstate, transfer, rho=tpw.RHO, p_ref=None,
     Divergence shows up here as a fixed point that stops contracting; the
     history carries the residual sequence so the approach to it can be measured
     rather than inferred from a failure.
+
+    With `vent`, the ventilation regime is FROZEN for the whole call: this
+    function never commits it. A bi-stable operating point has two answers, and
+    which one a steady solve should return is the caller's question, not this
+    function's - `vent_cavity.set_regime` picks the branch and the sweep that maps
+    the hysteresis is an outer programme. The last cavity iterate is returned in
+    hist['cav'] for the caller to commit if it wants to.
     """
-    points0 = np.array(fluid["panels"]["points"])
+    points0 = _reference_points(fluid, vent)
     acc = FixedPointAccelerator(accel, omega)
     if sstate["K"] is None:
         fes.assemble_operators(sstate)
     u = np.array(sstate["u"])
-    hist = {"residual": [], "tip": [], "iterations": 0, "converged": False}
+    hist = {"residual": [], "tip": [], "iterations": 0, "converged": False,
+            "cav": None}
     scale = max(float(np.linalg.norm(np.ptp(points0.reshape(-1, 3), axis=0))),
                 1e-300)
     for it in range(max_iter):
-        pts = fsx.displaced_points(transfer, points0, u)
+        pts, _ = _geometry(transfer, points0, u, None, vent)
         fluid = tpw.update_points(fluid, pts)
         mode = "relax" if it == 0 or (relax_wake_every
                                       and it % relax_wake_every == 0) else "frozen"
-        fluid = tpw.solve(fluid, wake=mode if fluid["wake"] is not None else "none")
-        f_struct, _ = _loads_on_structure(fluid, transfer, rho, p_ref)
+        fluid = _solve_fluid(fluid, vent, mode)
+        f_struct, loads = _loads_on_structure(fluid, transfer, rho, p_ref,
+                                              vent=vent)
+        hist["cav"] = loads.get("cav")
         level = fes.solve_static(sstate, f_struct, u0=u)
         resid = float(np.linalg.norm(level["u"] - u) / scale)
         hist["residual"].append(resid)
@@ -228,7 +361,7 @@ def time_march_fsi(fluid, sstate, transfer, dt=0.05, nsteps=100, rho=tpw.RHO,
                    coupling="strong", accel="aitken", omega=OMEGA_START,
                    tol=TOL_COUPLING, max_sub=MAX_SUB, rho_inf=fes.RHO_INF,
                    nmax=None, order=usw.DPHI_DT_ORDER, p_ref=None,
-                   verbose=False, callback=None):
+                   verbose=False, callback=None, vent=None):
     """March the coupled system. Returns (history, fluid, sstate).
 
     One step is
@@ -244,7 +377,7 @@ def time_march_fsi(fluid, sstate, transfer, dt=0.05, nsteps=100, rho=tpw.RHO,
             u_tilde = step_dynamic(level n, f)         # pure: level n intact
             u = accelerate(u, u_tilde)
         until ||u_tilde - u|| < tol
-        commit the structural level and the doublet strengths
+        commit the structural level, the doublet strengths AND the ventilation
 
     coupling='loose' takes exactly one subiteration. It is provided because its
     instability at low mass ratio is a verification result, not because it is
@@ -259,19 +392,23 @@ def time_march_fsi(fluid, sstate, transfer, dt=0.05, nsteps=100, rho=tpw.RHO,
     if coupling not in ("strong", "loose"):
         raise ValueError(f"coupling must be 'strong' or 'loose'; got {coupling}")
     par = fes.integrator_parameters(rho_inf)
-    points0 = np.array(fluid["panels"]["points"])
+    points0 = _reference_points(fluid, vent)
     lifting = fluid["wake"] is not None
+    drift = 0.0
     if sstate["K"] is None:
         fes.assemble_operators(sstate)
 
     # level zero: the structure where it stands, the fluid acyclic
-    pts = fsx.displaced_points(transfer, points0, sstate["u"])
-    vel = fsx.point_velocities(transfer, sstate["v"])
+    pts, vel = _geometry(transfer, points0, sstate["u"], sstate["v"], vent)
     fluid = tpw.update_points(fluid, pts, vel)
-    fluid = tpw.solve(fluid, wake="frozen" if lifting else "none")
-    f_struct, loads = _loads_on_structure(fluid, transfer, rho, p_ref)
+    fluid = _solve_fluid(fluid, vent, "frozen")
+    f_struct, loads = _loads_on_structure(fluid, transfer, rho, p_ref, vent=vent)
     sstate["f"] = f_struct
     sstate["a"] = fes.initial_acceleration(sstate, f_struct)
+    if vent is not None:
+        # seeded exactly as mu_committed is, and for the same reason: without it
+        # the first step's regime test compares against an uninitialised state
+        vcv.commit_vent(vent, loads["cav"], 0.0, dt)
 
     chord = fluid["chord_mean"]
     per_step = usw.convection_per_step(fluid, dt)
@@ -289,10 +426,35 @@ def time_march_fsi(fluid, sstate, transfer, dt=0.05, nsteps=100, rho=tpw.RHO,
             f"two-step ripple in the lift over a smooth quasi-steady part. "
             f"Resolve the mode, start from the static equilibrium, or lower "
             f"rho_inf")
+    if vent is not None:
+        if vent["weber"] < vs.WE_MIN:
+            warnings.warn(
+                f"Weber number {vent['weber']:.0f} is below {vs.WE_MIN:.0f}: at "
+                f"this scale surface tension inhibits inception and closes the "
+                f"spray sheet, and there is no surface tension in this model, so "
+                f"the inception boundary will be optimistic")
+        if vent["fn_h"] < FROUDE_WARN:
+            warnings.warn(
+                f"depth Froude number {vent['fn_h']:.2f} is below "
+                f"{FROUDE_WARN:.1f}: the free-surface image is a high-Froude "
+                f"linearisation on an UNDEFORMED plane, and below about one the "
+                f"real surface depresses steeply. history['drift_y'] is the "
+                f"linearised wave elevation this model throws away - watch it")
+        margin = vsl.washout_margin(vent, loads["resultants"]["CL"])
+        if abs(margin) < MARGIN_WARN:
+            warnings.warn(
+                f"the washout margin is {margin:+.3f}: the ventilated regime is "
+                f"metastable at this lift and Froude number and a marched run "
+                f"will flip. That is bi-stability, not a failure")
 
-    keys = ("t", "s", "CL", "CD", "CM", "CL_quasi_steady", "force", "moment",
+    keys = ["t", "s", "CL", "CD", "CM", "CL_quasi_steady", "force", "moment",
             "tip", "tip_x", "tip_y", "tip_z", "strain_energy", "kinetic_energy",
-            "fluid_work", "sub", "resid", "nrows", "mu_w_mid")
+            "fluid_work", "sub", "resid", "nrows", "mu_w_mid"]
+    if vent is not None:
+        # regime as an integer code into vent_cavity.REGIMES, so the history stays
+        # a numeric array like every other entry
+        keys += ["regime", "l_c_max", "l_c_mean", "d_cav", "phi_bar", "n_cav",
+                 "cav_iter", "cav_resid", "drift_y", "entrainment"]
     hist = {k: [] for k in keys}
     # seeded with the acyclic level, exactly as unsteady_wing.time_march seeds
     # its own: leaving it empty makes the first step's dmu/dt zero and lags the
@@ -333,6 +495,21 @@ def time_march_fsi(fluid, sstate, transfer, dt=0.05, nsteps=100, rho=tpw.RHO,
         hist["mu_w_mid"].append(
             float(wake["mu"][0, wake["mu"].shape[1] // 2])
             if wake is not None and wake["mu"].size else 0.0)
+        if vent is None:
+            return
+        cav = loads["cav"]
+        hist["regime"].append(vcv.REGIMES.index(vent["regime"]))
+        hist["l_c_max"].append(float(np.max(cav["l_c"])))
+        live = cav["l_c"] > 0.0
+        hist["l_c_mean"].append(float(cav["l_c"][live].mean()) if live.any()
+                                else 0.0)
+        hist["d_cav"].append(float(cav["d_cav"]))
+        hist["phi_bar"].append(float(cav["phi_bar"]))
+        hist["n_cav"].append(int(np.count_nonzero(cav["weight"])))
+        hist["cav_iter"].append(int(cav["iterations"]))
+        hist["cav_resid"].append(float(cav["resid"]))
+        hist["drift_y"].append(float(vent["drift_y"]))
+        hist["entrainment"].append(float(np.sum(cav["entrainment"])))
 
     _record(0.0, None, 0, 0.0, loads)
     if verbose:
@@ -345,26 +522,36 @@ def time_march_fsi(fluid, sstate, transfer, dt=0.05, nsteps=100, rho=tpw.RHO,
     for n in range(1, nsteps + 1):
         t = n * dt
         # --- shed ONCE, from the converged previous level
-        if lifting:
+        if lifting and vent is None:
             v_nodes = tpw.wake_node_velocity(fluid)
             tpw.shed(fluid["wake"], v_nodes, dt,
                      v_shed=tpw.te_convection_velocity(fluid))
             tpw.truncate(fluid["wake"], nmax)
             fluid["wake_version"] += 1
+        elif lifting:
+            # the image wake is PROJECTED, not advected: with phi antisymmetric
+            # the perturbation velocity mirrors with a sign, so a mirror-consistent
+            # convection would need it to vanish. See vent_mesh.symmetrise_wake -
+            # the drift it discards is the linearised wave elevation.
+            fluid, drift = vsl.shed_and_project(fluid, vent, dt, nmax)
 
         acc = FixedPointAccelerator(accel, omega)
         u_k = sstate["u"] + dt * sstate["v"] + 0.5 * dt ** 2 * sstate["a"]
         level, resid, sub = None, np.inf, 0
         for sub in range(1, n_sub_max + 1):
             kin = _level_from_u(sstate, u_k, dt, par)
-            fluid = tpw.update_points(
-                fluid, fsx.displaced_points(transfer, points0, kin["u"]),
-                fsx.point_velocities(transfer, kin["v"]))
-            fluid = tpw.solve(fluid, wake="frozen" if lifting else "none")
-            dphi = usw.backward_difference(mu_committed + [fluid["mu"]], dt,
-                                           order)
+            pts, vel = _geometry(transfer, points0, kin["u"], kin["v"], vent)
+            fluid = tpw.update_points(fluid, pts, vel)
+            fluid = _solve_fluid(fluid, vent, "frozen")
+            # a closure, not a precomputed array: mu changes INSIDE the cavity
+            # iteration, and the added-mass pressure genuinely moves the cavity
+            dphi_of_mu = (lambda m: usw.backward_difference(
+                mu_committed + [m], dt, order))
+            dphi = dphi_of_mu(fluid["mu"])
             f_struct, loads = _loads_on_structure(fluid, transfer, rho, p_ref,
-                                                  dphi_dt=dphi)
+                                                  dphi_dt=dphi, vent=vent,
+                                                  dphi_of_mu=dphi_of_mu, dt=dt)
+            dphi = loads["cav"]["dphi_dt"] if vent is not None else dphi
             level = fes.step_dynamic(sstate, f_struct, dt, par)
             resid = float(np.linalg.norm(level["u"] - u_k) / scale)
             if resid < tol:
@@ -380,6 +567,14 @@ def time_march_fsi(fluid, sstate, transfer, dt=0.05, nsteps=100, rho=tpw.RHO,
         mu_committed.append(fluid["mu"].copy())
         if len(mu_committed) > 2:
             mu_committed.pop(0)
+        # The ventilation regime is the THIRD thing that becomes a time level
+        # here, beside the structural level and the doublet strengths, and for
+        # the same reason: the flow regimes are bi-stable, so a regime that
+        # flipped inside the subiteration would stop the load being a function
+        # of the displacement at all.
+        if vent is not None:
+            vcv.commit_vent(vent, loads["cav"], t, dt)
+            vent["drift_y"] = drift
         _record(t, dphi, sub, resid, loads)
         if verbose:
             print(f"  step {n:3d}  t = {t:.3f}  s = {hist['s'][-1]:6.2f}  "
@@ -415,7 +610,8 @@ def steps_per_period(sstate, dt, nmodes=1):
     return float(1.0 / (max(freq[0], 1e-300) * dt))
 
 
-def added_mass_ratio(fluid, sstate, transfer, rho, dt, amplitude=None):
+def added_mass_ratio(fluid, sstate, transfer, rho, dt, amplitude=None,
+                     vent=None):
     """Ratio of fluid added mass to structural mass along the softest mode.
 
     Measured, not modelled: the surface is given the softest mode shape as an
@@ -434,7 +630,11 @@ def added_mass_ratio(fluid, sstate, transfer, rho, dt, amplitude=None):
         fes.assemble_operators(sstate)
     freq, phi = fes.modes(sstate, 1)
     shape = phi[:, :, 0]
-    points0 = np.array(fluid["panels"]["points"])
+    # a ventilated foil's added mass is the FROZEN-cavity added mass: a cavity
+    # boundary free to move is a different and much harder problem, so the
+    # distinction is made explicit rather than left to whoever reads the number
+    vent = None if vent is None else vcv.freeze(vent)
+    points0 = _reference_points(fluid, vent)
     scale = amplitude or (1e-4 * float(np.linalg.norm(
         np.ptp(points0.reshape(-1, 3), axis=0))))
     shape = shape * (scale / max(np.abs(shape).max(), 1e-300))
@@ -442,30 +642,34 @@ def added_mass_ratio(fluid, sstate, transfer, rho, dt, amplitude=None):
     for step in (0, 1):
         disp = 0.5 * shape * (step * dt) ** 2
         vel = shape * (step * dt)
-        fluid = tpw.update_points(fluid,
-                                  fsx.displaced_points(transfer, points0, disp),
-                                  fsx.point_velocities(transfer, vel))
-        fluid = tpw.solve(fluid, wake="frozen" if fluid["wake"] is not None
-                          else "none")
+        pts, vel_f = _geometry(transfer, points0, disp, vel, vent)
+        fluid = tpw.update_points(fluid, pts, vel_f)
+        fluid = _solve_fluid(fluid, vent, "frozen")
         mu_levels.append(fluid["mu"].copy())
     dphi = (mu_levels[1] - mu_levels[0]) / dt
     pan = fluid["panels"]
     # p = -rho dmu/dt and f = -p A n, so the added-mass force is +rho dmu/dt A n
     force = (rho * dphi)[:, None] * pan["areas"][:, None] * pan["normals"]
-    f_struct = fsx.structural_forces(transfer, pan, force)
+    if vent is None:
+        f_struct = fsx.structural_forces(transfer, pan, force)
+    else:
+        force[np.asarray(vent["image_mask"], dtype=bool)] = 0.0
+        f_struct = vnl.structural_forces_half(transfer, vent, pan, force)
     modal_force = float(np.einsum("mc,mc->", f_struct, shape))
     modal_mass = float(shape.reshape(-1) @ (sstate["M"] @ shape.reshape(-1)))
-    fluid = tpw.update_points(fluid, points0)
-    fluid = tpw.solve(fluid, wake="frozen" if fluid["wake"] is not None
-                      else "none")
+    pts, _ = _geometry(transfer, points0, np.zeros_like(shape), None, vent)
+    fluid = tpw.update_points(fluid, pts)
+    fluid = _solve_fluid(fluid, vent, "frozen")
     return {"added_mass": -modal_force, "modal_mass": modal_mass,
+            "cavity": "frozen" if vent is not None else "none",
             "ratio": -modal_force / max(modal_mass, 1e-300),
             "frequency_dry": float(freq[0]),
             "frequency_wet_estimate": float(freq[0]) / np.sqrt(
                 max(1.0 + -modal_force / max(modal_mass, 1e-300), 1e-30))}
 
 
-def aerodynamic_stiffness(fluid, sstate, transfer, rho, nmodes=4, amplitude=None):
+def aerodynamic_stiffness(fluid, sstate, transfer, rho, nmodes=4,
+                          amplitude=None, vent=None):
     """Reduced aerodynamic stiffness on the softest modes. (m, m)
 
     The static aeroelastic problem is linear in the displacement while the
@@ -481,26 +685,27 @@ def aerodynamic_stiffness(fluid, sstate, transfer, rho, nmodes=4, amplitude=None
     if sstate["K"] is None:
         fes.assemble_operators(sstate)
     freq, phi = fes.modes(sstate, nmodes)
-    points0 = np.array(fluid["panels"]["points"])
+    vent = None if vent is None else vcv.freeze(vent)
+    points0 = _reference_points(fluid, vent)
     q_dyn = 0.5 * rho * fluid["u_ref"] ** 2
     scale = amplitude or (1e-3 * float(np.linalg.norm(
         np.ptp(points0.reshape(-1, 3), axis=0))))
-    fluid = tpw.update_points(fluid, points0)
-    fluid = tpw.solve(fluid, wake="relax" if fluid["wake"] is not None else "none")
-    f_0, _ = _loads_on_structure(fluid, transfer, rho)
+    pts, _ = _geometry(transfer, points0, np.zeros_like(phi[:, :, 0]), None, vent)
+    fluid = tpw.update_points(fluid, pts)
+    fluid = _solve_fluid(fluid, vent, "relax")
+    f_0, _ = _loads_on_structure(fluid, transfer, rho, vent=vent)
     a_cols = []
     for j in range(nmodes):
         step = scale / max(np.abs(phi[:, :, j]).max(), 1e-300)
-        fluid = tpw.update_points(
-            fluid, fsx.displaced_points(transfer, points0, step * phi[:, :, j]))
-        fluid = tpw.solve(fluid, wake="frozen" if fluid["wake"] is not None
-                          else "none")
-        f_j, _ = _loads_on_structure(fluid, transfer, rho)
+        pts, _ = _geometry(transfer, points0, step * phi[:, :, j], None, vent)
+        fluid = tpw.update_points(fluid, pts)
+        fluid = _solve_fluid(fluid, vent, "frozen")
+        f_j, _ = _loads_on_structure(fluid, transfer, rho, vent=vent)
         # f = q A u with u = step * phi_j, so A phi_j = (f_j - f_0)/(q * step)
         a_cols.append((f_j - f_0).reshape(-1) / (q_dyn * step))
-    fluid = tpw.update_points(fluid, points0)
-    fluid = tpw.solve(fluid, wake="frozen" if fluid["wake"] is not None
-                      else "none")
+    pts, _ = _geometry(transfer, points0, np.zeros_like(phi[:, :, 0]), None, vent)
+    fluid = tpw.update_points(fluid, pts)
+    fluid = _solve_fluid(fluid, vent, "frozen")
     basis = phi.reshape(-1, nmodes)
     a_red = basis.T @ np.stack(a_cols, axis=1)
     k_red = basis.T @ (sstate["K"] @ basis)
@@ -508,7 +713,8 @@ def aerodynamic_stiffness(fluid, sstate, transfer, rho, nmodes=4, amplitude=None
             "f0": basis.T @ f_0.reshape(-1)}
 
 
-def divergence_pressure(fluid, sstate, transfer, rho, nmodes=4, amplitude=None):
+def divergence_pressure(fluid, sstate, transfer, rho, nmodes=4, amplitude=None,
+                        vent=None):
     """Smallest dynamic pressure at which the static coupled operator is singular.
 
     Divergence is the loss of positive definiteness of K - q A, so it is the
@@ -518,7 +724,8 @@ def divergence_pressure(fluid, sstate, transfer, rho, nmodes=4, amplitude=None):
     iteration of `static_aeroelastic` approaching the same number from below is
     what makes the pair a verification rather than a definition.
     """
-    red = aerodynamic_stiffness(fluid, sstate, transfer, rho, nmodes, amplitude)
+    red = aerodynamic_stiffness(fluid, sstate, transfer, rho, nmodes, amplitude,
+                                vent=vent)
     # posed as K_r^-1 A_r x = (1/q) x rather than A_r^-1 K_r x = q x: K_r is
     # positive definite by construction and A_r need not even be invertible
     vals = np.linalg.eigvals(np.linalg.solve(red["K"], red["A"]))

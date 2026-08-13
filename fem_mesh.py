@@ -122,7 +122,8 @@ def plate_wing_mesh(chord, span, thickness, n_chord, n_span, n_thick=2,
     return mesh
 
 
-def foil_ribs(points, tip_fraction=1.0, min_half_thickness=0.0):
+def foil_ribs(points, tip_fraction=1.0, min_half_thickness=0.0,
+              pinched=(True, True)):
     """Lower and upper surface paired by chordwise station, tips rebuilt.
 
     Returns (lower, upper), both (n_c+1, nspan+1, 3), ordered from the LEADING
@@ -135,6 +136,13 @@ def foil_ribs(points, tip_fraction=1.0, min_half_thickness=0.0):
     station. min_half_thickness, in units of the local chord, blunts the
     leading and trailing edge columns if their wedge elements are too ill
     conditioned for the material at hand; the default keeps the true geometry.
+
+    pinched says which of the two end stations to rebuild, (j=0, j=nspan). Both,
+    by default, because both ends of a wrap mesh are pinched. The immersed half
+    of a doubled surface-piercing strut is the exception: its far station is the
+    open root at the waterline and carries its own true thickness, so it passes
+    (True, False). For an untapered strut the rebuild would be bit-exact anyway,
+    which makes this a latent trap rather than a live bug.
     """
     pts = np.asarray(points, dtype=float)
     nwrap = pts.shape[0] - 1
@@ -147,8 +155,10 @@ def foil_ribs(points, tip_fraction=1.0, min_half_thickness=0.0):
     upper = pts[nwrap - wrap]
     mid = 0.5 * (lower + upper)
     half = 0.5 * (upper - lower)
-    half[:, 0] = tip_fraction * half[:, 1]
-    half[:, nspan] = tip_fraction * half[:, nspan - 1]
+    if pinched[0]:
+        half[:, 0] = tip_fraction * half[:, 1]
+    if pinched[1]:
+        half[:, nspan] = tip_fraction * half[:, nspan - 1]
     if min_half_thickness > 0.0:
         chord = np.ptp(pts[..., 0], axis=0).max()
         floor = min_half_thickness * chord
@@ -160,7 +170,7 @@ def foil_ribs(points, tip_fraction=1.0, min_half_thickness=0.0):
 
 
 def solid_foil_mesh(points, n_thick=2, tip_fraction=1.0,
-                    min_half_thickness=0.0):
+                    min_half_thickness=0.0, pinched=(True, True)):
     """Solid foil lofted across the paired wrap stations of a fluid mesh.
 
     Chordwise resolution is inherited from the wrap mesh (n_c = nwrap/2 element
@@ -169,10 +179,14 @@ def solid_foil_mesh(points, n_thick=2, tip_fraction=1.0,
     - collapse to a single node per layer, so the end columns are wedges and
     carry no duplicated free nodes.
 
+    pinched is passed to foil_ribs and says which span-end stations are pinched
+    tips to be rebuilt; the immersed half of a surface-piercing strut passes
+    (True, False) because its far station is an open root.
+
     node_sets: 'surface_lower', 'surface_upper', 'root' (midspan), 'tip_min',
     'tip_max', 'leading', 'trailing', 'all'.
     """
-    lower, upper = foil_ribs(points, tip_fraction, min_half_thickness)
+    lower, upper = foil_ribs(points, tip_fraction, min_half_thickness, pinched)
     n_r, n_j = lower.shape[0], lower.shape[1]
     n_k = int(n_thick)
     scale = np.linalg.norm(np.ptp(np.asarray(points).reshape(-1, 3), axis=0))

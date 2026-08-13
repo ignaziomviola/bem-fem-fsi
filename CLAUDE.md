@@ -45,11 +45,13 @@ Update them when behaviour changes - the tables hold actuals, not targets.
 ## Commands
 
 ```bash
-# tests. Counts are 44 / 21 / 4 / 14 / 20; anything less means a suite errored.
+# tests. Counts are 44 / 21 / 87 / 4 / 14 / 20; anything less means a suite errored.
 python3 test_fem.py                       # structural fast set, ~0.5 s
 FEM_SLOW=1 python3 test_fem.py            # + convergence studies, ~5 s
 python3 test_fsi.py                       # coupling fast set, ~1 s
 FSI_SLOW=1 python3 test_fsi.py            # + coupled physics, ~23 s
+python3 test_vent.py                      # ventilation fast set, ~7 s
+VENT_SLOW=1 python3 test_vent.py          # + coupled ventilation, ~40 s
 python3 test_vendored.py                  # the fluid copies are unmodified
 python3 test_vendored.py --write          # regenerate the manifest after a re-vendor
 python3 test_thick_panel_wing.py          # vendored steady suite, unchanged
@@ -72,6 +74,8 @@ python3 verify_unsteady.py                # vendored: Wagner, Theodorsen (~1 h)
 # command-line drivers; each ends in plt.show(), hence MPLBACKEND=Agg in batch
 python3 make_thick_sample_inputs.py       # meshes and onset profiles
 python3 fem_mesh.py                       # report and check the mesh builders
+python3 vent_section.py                   # the sectional cavity relations
+python3 vent_mesh.py                      # the doubled surface-piercing strut
 MPLBACKEND=Agg python3 fem_solid.py       # cantilever, against the beam solution
 printf "6.0\n0.12\n5.0\n2.0e8\n1200\n1000\n0.05\n40\n" | MPLBACKEND=Agg python3 fsi_driver.py
 ```
@@ -86,14 +90,26 @@ generalised eigenproblem are written out in `fem_solid.py`.
 
 ## Architecture
 
-`fem_*` is the structure, `fsi_*` the coupling, and the vendored fluid files
-keep their own names. Nothing imports downward:
+`fem_*` is the structure, `fsi_*` the coupling, `vent_*` the ventilation closure
+model, and the vendored fluid files keep their own names. Nothing imports
+downward:
 
 ```
 fem_materials  <-  fem_solid  <-  fem_mesh (builders only)
                         ^
 thick_panel_wing  <-  fsi_transfer  <-  fsi_driver  ->  unsteady_wing
+                                            |
+                          vent_section  <-  vent_cavity  <-  vent_solve
+                                        \-  vent_loads   <-/
+                          vent_mesh (builders only)
 ```
+
+`vent_section` imports nothing from this repository, deliberately: it is the only
+part of the ventilation model with closed-form verification, so it is the fixed
+reference the panel-level model is checked against. `vent_cavity` does not import
+`thick_panel_wing` either - it consumes a panels dictionary as data, so the flood
+fill, the closure-line fit and the regime machine are testable on a hand-built
+four-by-four panels dictionary with no solver in the loop.
 
 `fem_solid.py` holds the structural physics in ten dependency-ordered sections;
 `fsi_transfer.py` is the only module that imports both sides.
@@ -104,7 +120,7 @@ explicit arguments with all mutable data in an explicit state dict, so two
 states coexist (the verification programmes build nine independent cases in one
 process); and prompts, prints and figures live only under `main()`.
 
-### The four states, and who owns each
+### The five states, and who owns each
 
 This is the part that cannot be read off any single file.
 
@@ -119,7 +135,13 @@ This is the part that cannot be read off any single file.
 - **`transfer`** - `rows`, `weights`, the weld map and the fluid mesh shape.
   Built ONCE on the two reference configurations by `build_transfer` and never
   rebuilt: that is what makes the coupling residual a fixed function of the
-  displacement, which quasi-Newton acceleration requires.
+  displacement, which quasi-Newton acceleration requires. On a ventilating case it
+  is built on the IMMERSED HALF, through `vent_mesh.half_interface`.
+- **`vent`** - the ventilation level. Its contract is `docs/VENTILATION.md`. The
+  mirror maps and the parameters are built once by `build_vent`; the regime, the
+  cavity extent and the diagnostics advance ONLY in `commit_vent`. Everything a
+  coupling subiteration computes lives in a `cav` dict that is returned inside
+  `loads["cav"]` and discarded.
 
 `solve_static` and `step_dynamic` return a **level** dict and mutate nothing;
 `commit(sstate, level, f_ext)` is the only thing that advances the state of
@@ -139,8 +161,13 @@ commit the structural level AND the doublet strengths
 
 ### Diagnostics to reach for when a coupled run misbehaves
 
-`fsi_driver.steps_per_period` and `unsteady_wing.convection_per_step` are the
-two resolution measures; `fsi_driver.added_mass_ratio` says whether staggered
+`fsi_driver.ventilation_margin` says how close the operating point is to
+inception and how far it is from the washout boundary;
+`vent_solve.antisymmetry_residual` says whether the free surface is still exact;
+`vent_cavity.cavity_report` gives the cavity's extent, depth, closure angle,
+thickness and entrainment; `history['drift_y']` is the wave elevation the image
+projection discards. `fsi_driver.steps_per_period` and
+`unsteady_wing.convection_per_step` are the two resolution measures; `fsi_driver.added_mass_ratio` says whether staggered
 coupling could ever work; `fsi_transfer.conservation_report` separates a
 transfer defect from a solver defect; `fsi_driver.divergence_pressure` locates
 a static instability directly; `fsi_driver.growth_rate` fits a marched
@@ -185,6 +212,31 @@ reintroduces a real bug.
 - **The Aitken factor is not clipped to a small range.** The optimal factor for
   a dominant eigenvalue of 0.98 is 50, so a clip to plus or minus two removes
   exactly the acceleration it exists to supply.
+- **The free surface is a negative image realised by MESH DOUBLING, and the image
+  wake is projected rather than convected.** With phi antisymmetric the
+  perturbation velocity mirrors with a sign while the onset does not, so a
+  mirror-consistent convection would need the perturbation to vanish; left to
+  `convect` the image wake drifts off the mirror and the free-surface condition is
+  lost progressively. The drift the projection discards IS the linearised wave
+  elevation and is reported.
+- **On a doubled mesh the vendored `tpw.solve` is the RIGID-WALL answer,
+  bit-for-bit.** Mirroring leaves `-n.u_rel` unchanged for an onset with no
+  spanwise component, so the free surface needs the source-strength sign flip. A
+  bare vendored solve on a ventilating state returns the zero-Froude solution
+  quietly, with about twice the lift.
+- **The cavity is a continuous per-station length with a fractional closure panel,
+  never a boolean mask.** A boolean mask makes the load piecewise-constant in the
+  displacement and IQN-ILS then fits a staircase.
+- **The cavity extent is read off the BASELINE wetted pressure, never off the
+  pressure the cavity has itself imposed.** The dynamic condition makes the latter
+  equal the cavity pressure on the cavity, so the margin is identically zero there
+  and the cavity collapses every iteration.
+- **The ventilation regime advances only on commit, like the doublet history**, and
+  for a stronger reason: the regimes are bi-stable, so a mid-subiteration flip
+  would stop the load being a function of the displacement at all.
+- **The cavity growth rate is limited, and the limit bounds the cavity the LOAD
+  sees.** Without it the extent jumps to equilibrium in one step and the structural
+  response measures the time step rather than the flow.
 - **The lumping of panel forces reuses `tpw.centroid_weights`.** It is a
   partition of unity reproducing the collocation point, so force and moment are
   conserved exactly, and it is the adjoint of the operator the fluid uses to
@@ -215,7 +267,19 @@ reintroduces a real bug.
   flow to carry shed vorticity away, so the sheet piles up at the trailing
   edge. Added-mass work is done without a wake, as the fluid's own sphere gate
   is.
-- All the expected results of the upstream documents still apply.
+- **The doubled mesh's `CL` is a near-cancellation and not the answer**: the image
+  half carries the negated loading, so resultants come from the immersed half on
+  `s_ref = h*c` and `tpw.get_loads` must never be called on a ventilating state.
+- **The depth loading at the waterline is O(dy), not zero.** `phi = 0` on the free
+  surface plane is the exact statement; the panel loading vanishes only in the
+  limit.
+- **The energy balance does not close while a cavity is growing**, because
+  entrained air does work this model does not account for. It is reported, not
+  asserted.
+- **The same conditions can give two regimes.** That is the bi-stability, so a
+  ventilated case is reproducible only together with its history.
+- All the expected results of the upstream documents and of
+  `docs/VENTILATION.md` still apply.
 
 ## Extending the materials
 
@@ -245,6 +309,19 @@ through `mat_id`.
 
 Kinematics are linear (small displacement, small strain) and there is no shell
 element; both are recorded as open items in `docs/FEM.md`.
+
+## Extending the ventilation model
+
+`docs/VENTILATION.md` owns this. The seams that exist: `dsigma` makes the cavity
+vaporous rather than atmospheric and every sectional relation still holds;
+`closure` chooses between the Dirichlet cavity and the auditable pressure clip;
+`extent_rule` chooses how the cavity length is closed; `growth_chords` sets how a
+transition is resolved in time; and `image=False` runs the immersed foil alone with
+no free surface at all, which is the cheap fast-test fixture. The inputs that are
+inputs and not results - the stall angle, the pressure-recovery fraction, the
+inception area fraction, the Weber threshold and the growth rate - all live in the
+`vent` state where they can be seen, and every verification case prints the ones it
+depends on.
 
 ## Meshes
 
