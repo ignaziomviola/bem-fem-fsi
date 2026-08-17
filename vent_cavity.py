@@ -745,9 +745,16 @@ def freeze(vent):
 # ---------------------------------------------------------------- 8 report
 
 def cavity_report(pan, frame, vent, cav):
-    """What to ask a misbehaving ventilated run. -> dict of measured scalars"""
+    """What to ask a misbehaving ventilated run. -> dict of measured scalars
+
+    The area and the volume are taken over the IMMERSED HALF, like every other
+    resultant of a doubled mesh. The image half carries the mirror of the cavity
+    with the opposite thickness, so summing the volume over the whole mesh is a
+    near cancellation and returns the wrong sign as readily as the right one.
+    """
     weight = np.asarray(cav["weight"])
     ext = wrap_extent(pan, frame)
+    real = np.asarray(vent["real_mask"], dtype=float)
     return {
         "regime": vent["regime"], "d_cav_over_h": cav["d_cav"] / vent["h"],
         "phi_bar_deg": np.degrees(cav["phi_bar"]),
@@ -755,10 +762,10 @@ def cavity_report(pan, frame, vent, cav):
         "l_c_max": float(np.max(cav["l_c"])), "l_c_mean_wet":
             float(np.mean(cav["l_c"][cav["l_c"] > 0.0])) if np.any(cav["l_c"] > 0)
             else 0.0,
-        "n_cavity": int(np.count_nonzero(weight)),
-        "cavity_area": float((weight * np.asarray(pan["areas"])).sum()),
+        "n_cavity": int(np.count_nonzero(weight * real)),
+        "cavity_area": float((weight * real * np.asarray(pan["areas"])).sum()),
         "cavity_volume": float((np.asarray(cav.get("thickness", 0.0)) * weight
-                                * np.asarray(pan["areas"])).sum()),
+                                * real * np.asarray(pan["areas"])).sum()),
         "thickness_min": float(np.min(np.asarray(cav.get("thickness", [0.0])))),
         "closure_residual": float(np.abs(cav.get("closure_residual", 0.0)).max()),
         "iterations": int(cav.get("iterations", 0)),

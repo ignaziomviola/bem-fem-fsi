@@ -37,10 +37,19 @@ how to read those four from this repository rather than from upstream.
 sign or a factor, and the structural verification results with measured
 numbers. `docs/COUPLING.md` owns the interface operators, the partitioned
 schemes, the two resolution constraints and the coupled verification results.
+`docs/VENTILATION.md` owns the ventilation formulation, the free-surface image,
+the cavity boundary-value problem, the regime machine and the V-case results.
 `docs/ARCHITECTURE.md` owns the block boundaries, the state contracts, the
 public signatures and the extension hooks, and its final section records what
 the coupling extension cost against what the fluid architecture predicted.
 Update them when behaviour changes - the tables hold actuals, not targets.
+
+`docs/paper/ventilation.tex` is a manuscript and is **derived**, not
+authoritative: every number in it comes from `verify_vent.py` or from
+`docs/paper/make_figures.py`, so a behaviour change is recorded in the documents
+above first and only then reflected there. `docs/paper/make_figures.py` is the
+one file in this repository that writes files, and it writes only under
+`docs/paper/figures/`.
 
 ## Commands
 
@@ -68,8 +77,15 @@ python3 verify_fem.py --case F4           # one case: F1..F9
 python3 verify_fsi.py                     # all six coupled cases, ~30 s
 python3 verify_fsi.py --case C3           # one case: C1..C6
 python3 verify_fsi.py --quick             # the cheap ones only (C1, C2, C6)
+python3 verify_vent.py                    # all six ventilation cases, ~110 s
+python3 verify_vent.py --case V4           # one case: V1..V6
+python3 verify_vent.py --quick            # the cheap ones only (V1, V2, V5)
 python3 verify_analytic.py                # vendored: cylinder and Joukowski
 python3 verify_unsteady.py                # vendored: Wagner, Theodorsen (~1 h)
+
+# the paper's figures, which are the only files this repository writes
+MPLBACKEND=Agg python3 docs/paper/make_figures.py            # all eleven, ~25 min
+MPLBACKEND=Agg python3 docs/paper/make_figures.py mesh loads # named figures only
 
 # command-line drivers; each ends in plt.show(), hence MPLBACKEND=Agg in batch
 python3 make_thick_sample_inputs.py       # meshes and onset profiles
@@ -272,7 +288,37 @@ reintroduces a real bug.
   `s_ref = h*c` and `tpw.get_loads` must never be called on a ventilating state.
 - **The depth loading at the waterline is O(dy), not zero.** `phi = 0` on the free
   surface plane is the exact statement; the panel loading vanishes only in the
-  limit.
+  limit. Refinement separates two statements that are easy to conflate: the
+  shallowest strip's CIRCULATION falls as dy^0.74, from 0.549 to 0.118 of its
+  maximum between four and thirty-two strips, while that strip's
+  pressure-integrated sectional force converges to 0.42 of the peak and does NOT
+  vanish, because it keeps a non-circulatory contribution from the large depthwise
+  perturbation velocity on the plane. Asserting that the sectional FORCE tends to
+  zero would be asserting the wrong thing.
+- **A cavity that is growing during a march must be resolved in time, and the
+  growth rate is what resolves it.** At `growth_chords = 1.0` and dt such that the
+  cavity gains 0.02 c per step, the marched `CL` oscillates over a range of order
+  one; at 0.2 chords per chord of travel it is smooth and monotone. The
+  oscillation is neither structural ringing nor added mass - it survives a
+  quasi-steady evaluation and a thousandfold stiffening that reduces the tip
+  deflection to 6.5e-7 chords - and the steady load is smooth and monotone in the
+  cavity length at frozen extents. It is an OPEN item, recorded in
+  `docs/VENTILATION.md`, and the practical rule is to resolve the front.
+- **The FV label is not reached on a pinched-tip mesh at moderate incidence.**
+  `vs.regime` needs `D = h` exactly, and the immersed tip of a wrap mesh is
+  pinched, so a cavity covering 0.94 h with half the lift gone is still `PV`.
+  Ventilated verification cases therefore IMPOSE the branch, which is legitimate
+  because the branches are bi-stable and the caller chooses. The regime map's
+  FW-to-PV boundary is the stall angle and is Froude-independent by construction:
+  the seal gate is a function of incidence alone.
+- **The mean closure angle is mesh-sensitive at high Froude number.** At
+  `Fn_h = 1.5`, `alpha = 20 deg` it is 39.1 to 45.8 degrees over six to sixteen
+  spanwise stations, against the measured 40.75; at `Fn_h = 2.5` it drifts from 47
+  to 29 degrees over the same refinement, because the pinched tip's suction spike
+  produces a spuriously long cavity there and an affine fit of depth against
+  closure position gives that outlier heavy leverage. Area-weighting the fit does
+  not cure it - the pinched strip's area is not small - and the tip is out of
+  scope, so the number is reported with its range.
 - **The energy balance does not close while a cavity is growing**, because
   entrained air does work this model does not account for. It is reported, not
   asserted.

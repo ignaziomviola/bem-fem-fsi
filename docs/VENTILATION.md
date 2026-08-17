@@ -15,7 +15,10 @@ surface-piercing hydrofoil at moderate Froude numbers: cavity formation,
 elimination and stability*, J. Fluid Mech. **800** (2016) 5-56. Equation numbers
 in parentheses are that paper's.
 
-Last updated 13 August 2026.
+`docs/paper/ventilation.tex` is a manuscript derived from this document and
+from `verify_vent.py`; it holds no number of its own.
+
+Last updated 17 August 2026.
 
 ## What is modelled, and what is not
 
@@ -479,6 +482,32 @@ verification.
   discretisation and is not the default. A fractional closure panel in the
   *system* mask, rather than only in the pressure, would remove the remaining
   discreteness.
+- **A cavity growing during a marched computation produces an oscillation in `CL`
+  whose amplitude is set by the growth rate, and on a rigid structure the
+  mechanism is not identified.** Two parts, and only the second is open.
+  *Physical:* on a compliant strut the load step of a transition excites the WET
+  fundamental, and the ringing does not decay because the model carries no
+  structural damping while the generalised-alpha dissipation acts on the high
+  modes. Measured at `alpha = 10 deg`, `Fn_h = 2.5`, `dt = 0.02`, `nwake = 24`,
+  `E = 2e8`: the standard deviation of `CL` over a 70-step march falls from 0.329
+  at `growth_chords = 0.2` to 0.030 at 0.05, the period is 0.7 in `s`, and
+  `steps_per_period` reports seventeen steps per wet period, so the response is
+  resolved. Resolve the front and the ringing shrinks with it.
+  *Open:* the same oscillation survives making the structure rigid. At
+  `E = 2e12` the tip deflection is 6.5e-7 chords, so there is no structural
+  response, yet at `growth_chords = 1.0` `CL` ranges over -1.50 to +0.55. Four
+  causes are excluded by measurement. Not the added-mass term: a quasi-steady
+  evaluation, which has no `dphi/dt`, oscillates identically (standard deviation
+  0.249 against 0.232). Not structural ringing, by the rigid case above. Not the
+  steady load's dependence on the cavity length: at frozen extents `CL(L)` falls
+  smoothly from 0.380 to 0.211 over `0 <= L <= 0.6`. Not the marched wetted path:
+  the same case below stall is smooth to 5.7e-3. The remaining suspect is the
+  unsteady pressure of the cavity's own prescribed doublet strength on a strip
+  whose cavity has reached the trailing edge, which would make it a facet of the
+  wake-borne cavity item below. Until it is resolved, marched transients are
+  reported for the growth of the cavity, the depth it reaches, and structural
+  responses at a resolved growth rate - never for the detailed time history of the
+  load at a fast one.
 - The cavity that leaves the trailing edge closes in the wake, and the wake sheet
   is then the cavity's continuation. That case is treated by prescribing the
   cavity condition over the whole suction side of the strip and taking the closure
