@@ -806,12 +806,12 @@ def fig_closure_angle():
     ax.axhline(45.0, color="k", ls="--", lw=1.2)
     ax.axhline(H_PHI_WASHOUT, color="0.5", ls=":", lw=1.2)
     ax.annotate(r"criterion, $\bar\Phi = 45^\circ$", (12.3, 46.5), fontsize=7)
-    ax.annotate("measured at washout, 40.75", (12.3, 35.5), fontsize=7)
+    ax.annotate("measured at washout, 40.75", (12.3, 36.0), fontsize=7)
     ax.set_xlim(10.0, 26.0)
-    ax.set_ylim(20.0, 70.0)
+    ax.set_ylim(10.0, 80.0)
     ax.set_xlabel(r"$\alpha$ [deg]")
     ax.set_ylabel(r"$\bar\Phi$ [deg]")
-    ax.set_xticks([12, 18, 24]); ax.set_yticks([20, 35, 45, 60])
+    ax.set_xticks([12, 18, 24]); ax.set_yticks([20, 40, 60, 80])
     ax.legend(frameon=False, loc="upper right")
     ax.text(0.04, 0.06, "(b)", transform=ax.transAxes)
     fig.tight_layout()
@@ -956,7 +956,7 @@ def fig_hysteresis():
 
 def fig_transient():
     """The coupled response to an inception event."""
-    alpha, dt, nsteps, growth = 10.0, 0.02, 70, 0.1
+    alpha, dt, nsteps, growth = 10.0, 0.02, 70, 0.2
     fluid, sstate, transfer, vent, mesh = strut_case(
         alpha=alpha, n_c=8, nspan_half=6, nwake=24, unsteady=True,
         growth_chords=growth, regime="FW")
@@ -981,7 +981,7 @@ def fig_transient():
     fig, axes = plt.subplots(3, 1, figsize=(3.6, 4.8), sharex=True)
     axes[0].plot(s, cl, "k-", marker="o", ms=2.5)
     axes[0].axhline(cl_wet, color="0.6", ls="--", lw=0.9)
-    axes[0].annotate("wetted equilibrium", (0.06, cl_wet + 0.03), fontsize=7)
+    axes[0].annotate("wetted equilibrium", (1.25, cl_wet + 0.015), fontsize=7)
     axes[0].set_ylabel(r"$C_L$")
     axes[1].plot(s, np.asarray(hist["l_c_max"]), "k-",
                  label=r"$L_{\mathrm{c}}/c$")
@@ -999,17 +999,14 @@ def fig_transient():
     axes[2].set_xlim(0.0, s.max())
     fig.tight_layout()
     save(fig, "transient")
-    period = 2.0 / max(fsd.steps_per_period(sstate, dt), 1e-30) * dt
     note("transitions: %s" % vent["transitions"])
     note("wetted equilibrium CL %.4f; ventilated mean over the last third %.4f, "
          "ratio %.3f" % (cl_wet, float(cl[-nsteps // 3:].mean()),
                          float(cl[-nsteps // 3:].mean()) / cl_wet))
     note("tip: static %.3e c, peak %.3e c, overshoot %.2f"
          % (tip[0] * 1e-3, tip.max() * 1e-3, tip.max() / max(tip[0], 1e-30)))
-    note("steps per period %.1f, so the wet fundamental is resolved by %.0f "
-         "steps; ringing period in s = %.2f"
-         % (fsd.steps_per_period(sstate, dt), fsd.steps_per_period(sstate, dt),
-            period))
+    note("steps per period %.1f (the second resolution constraint)"
+         % fsd.steps_per_period(sstate, dt))
     note("subiterations per step: median %.1f, max %d"
          % (float(np.median(hist["sub"])), int(np.max(hist["sub"]))))
     note("growth rate %.2f chords of cavity per chord of travel, %.4f c per step"

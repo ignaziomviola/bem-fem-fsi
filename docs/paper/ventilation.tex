@@ -60,15 +60,14 @@ on the image half; by a cavity whose pressure, length and thickness are solved a
 a mixed doublet--source boundary-value problem; and by a hysteretic regime
 machine that advances only on commit. The
 free-surface condition holds to \num{1.7e-16} of the doublet scale, and the image
-antisymmetry, solved for rather than imposed, to \num{2.4e-14}. Ventilation
-removes \SI{44}{\percent} of the lift and moves the
-centre of pressure from $0.34c$ to $0.19c$, against the $3c/16$ of a
-supercavitating section. The computed mean cavity closure angle lies within
-\SI{4}{\percent} of the value measured at washout, and bi-stability spans
-ten degrees of incidence. Softening the strut deepens its suction margin by a
+antisymmetry, solved for rather than imposed, to \num{2.4e-14}. Ventilation removes
+\SI{44}{\percent} of the lift and moves the centre of pressure to $0.19c$,
+against the $3c/16$ of a supercavitating section. The computed mean cavity closure
+angle lies within \SI{4}{\percent} of the value measured at washout, although its
+aspect-ratio trend does not, and bi-stability spans ten degrees of incidence. Softening the strut deepens its suction margin by a
 third and moves the operating point across the boundary beyond which a
-ventilated cavity is sustained, so a lifting surface's load limit can now be
-assessed together with its structural response.
+ventilated cavity is sustained, so a lifting surface's load limit can be assessed
+together with its structural response.
 \end{abstract}
 
 \section{Introduction}
@@ -672,25 +671,47 @@ angle is an output, and comparing it with the value measured at washout is a rea
 comparison and not a circularity. Figure~\ref{fig:closure}a shows the computed
 closure line at three Froude numbers with the affine fit and the local
 re-entrant-jet direction of $2\Phi$ superimposed, which is the construction used
-to measure the angle photographically. At the condition of the published
-measurement - $\alpha = \ang{20}$, $\Fnh = 1.5$, $\ARh = 1$ - the computed angle
-is \ang{39.1} to \ang{45.8} across six to sixteen spanwise stations and
-\ang{10} to \ang{14} chordwise panels, centred on about \ang{42.5} and
-insensitive to the chordwise resolution to \ang{0.4}. The measured mean is
-\ang{40.75}, tightly clustered over all incidences and aspect ratios, and the
-proposed criterion is \ang{45}. The agreement is \SI{4}{\percent} at the
-published condition. Figure~\ref{fig:closure}b shows the same quantity against
-incidence for three immersed aspect ratios, in the layout of the published
-measurement.
+to measure the angle photographically: the cavity closes further aft as the Froude
+number rises, and the jet sweeps from upstream towards the tip as the closure line
+tapers.
 
-One limitation of this diagnostic must be stated where it is used. At high Froude
-number, where the cavity is long at every depth, the closure angle becomes
-sensitive to the spanwise resolution, drifting from \ang{47} to \ang{29} between
-six and fourteen stations. The cause is the pinched immersed tip: the mesh
-builder pins the span-end section to a point, the suction spike there is a
-consequence of that pinch rather than of the flow, and the spuriously long cavity
-it produces has strong leverage on a fit of depth against closure position. The
-blunt tip of the experiments, and with it base ventilation and the aerated
+At the condition of the published measurement - $\alpha = \ang{20}$,
+$\Fnh = 1.5$, $\ARh = 1$ - the computed angle is \ang{39.1} to \ang{45.8} across
+six to sixteen spanwise stations and \ang{10} to \ang{14} chordwise panels,
+centred on about \ang{42.5} and insensitive to the chordwise resolution to
+\ang{0.4}. The measured mean is \ang{40.75} and the proposed criterion is
+\ang{45}, so the agreement is \SI{4}{\percent} at the published condition.
+
+Figure~\ref{fig:closure}b makes the comparison at each case's own washout Froude
+number rather than at a common one, which is where the angle was measured: the
+Froude number is iterated to \eqref{eq:washout} evaluated on that case's computed
+lift, so each point sits on its own predicted washout boundary. Over four
+incidences and three immersed aspect ratios the mean is \ang{41.08} against the
+measured \ang{40.75}, which is agreement to \SI{0.8}{\percent}. That agreement of
+the mean conceals a disagreement that matters more, and it is reported rather than
+verified: the computed angle is \ang{42.2} to \ang{46.6} at $\ARh = 1$, but
+\ang{19.9} to \ang{21.4} at $\ARh = 0.5$ and \ang{57.4} to \ang{59.9} at
+$\ARh = 1.5$, a factor of three across the range, where the measurement found the
+angle tightly clustered for every incidence and aspect ratio. The mechanism is
+geometric and can be named exactly. The angle is taken between the closure line
+and the flow, so its tangent is the ratio of the cavity's depth extent to its
+chordwise spread; the depth extent is the immersion while the chordwise spread is
+set by the cavitation number and the sectional incidence, neither of which depends
+on the immersion at fixed $\Fnh$ and $\alpha$. The angle therefore inherits the
+aspect ratio directly. That the measured angle does not implies that the physical
+cavity length scales with immersion, which this model does not reproduce, and the
+\ang{45} criterion is consequently trustworthy here only near the aspect ratio at
+which it was calibrated.
+
+One further limitation belongs where the diagnostic is used. At high Froude
+number, where the cavity is long at every depth, the angle becomes sensitive to
+the spanwise resolution, drifting from \ang{47} to \ang{29} between six and
+fourteen stations. The cause is the pinched immersed tip: the mesh builder pins
+the span-end section to a point, the suction spike there is a consequence of that
+pinch rather than of the flow, and the spuriously long cavity it produces has
+heavy leverage on a fit of depth against closure position. Weighting the fit by
+station area does not cure it, because the pinched station's area is not small.
+The blunt tip of the experiments, and with it base ventilation and the aerated
 tip-vortex inception route, is outside the scope of this model.
 
 \begin{figure}[t]
@@ -699,9 +720,9 @@ tip-vortex inception route, is outside the scope of this model.
   \caption{The cavity closure line and its mean angle from the horizontal:
     (a) the computed closure line at $\alpha = \ang{20}$, $\ARh = 1$ for
     $\Fnh$ from $1.15$ to $2$, with the affine fit and the local jet direction
-    $2\Phi$; (b) the mean closure angle against incidence at $\Fnh = 1.5$ for
-    three immersed aspect ratios, with the proposed stability criterion and the
-    value measured at washout.}
+    $2\Phi$; (b) the mean closure angle against incidence for three immersed
+    aspect ratios, each point at its own predicted washout Froude number, with the
+    proposed stability criterion and the value measured at washout.}
   \label{fig:closure}
 \end{figure}
 
@@ -789,14 +810,20 @@ this fidelity and is reported.
 
 The structure of the strut is soft enough for the transition to matter: the dry
 natural frequencies are \num{6.62}, \num{16.24} and \SI{37.36}{\hertz} and the
-added-mass ratio on a frozen cavity is $4.05$, so the wet fundamental period is
-resolved by about fifteen steps at the time step used.
-Figure~\ref{fig:transient} marches the coupled system through an inception event
-triggered by injecting air at the junction of the leading edge and the free
-surface, which is the perturbation route of the experiments and fires below the
-stall angle. The cavity depth reaches the tip within one step while the length
-grows linearly at the imposed rate limit, and the tip deflection peaks at
-\num{3.0e-3} chords.
+added-mass ratio on a frozen cavity is $4.05$; the wet fundamental period is
+resolved by $7.6$ steps at the time step used, which is above the resolution
+constraint but not comfortably.
+Figure~\ref{fig:transient} marches the coupled system from a wetted static
+equilibrium through an inception event triggered by injecting air at the junction
+of the leading edge and the free surface, which is the perturbation route of the
+experiments and fires below the stall angle. The cavity depth reaches the tip
+within one step while the length grows linearly at the imposed rate limit. The
+lift falls from its wetted equilibrium of $0.2187$ to a mean of $0.1264$ over the
+last third of the march, a ratio of $0.578$ against the $0.575$ that the steady
+solve gives at the same incidence, so the marched and steady load losses agree to
+half a per cent. The tip deflection grows from $1.21$ to a peak of
+\num{2.19e-3} chords, an overshoot of $1.81$ on the static ventilated
+deflection.
 
 \begin{figure}[t]
   \centering
@@ -818,15 +845,20 @@ the balance recovers.
 The second is the amplitude of the ringing, and it separates into a physical part
 and an open one. The lift oscillates at a period of $0.7$ in distance travelled,
 which is the wet fundamental: the dry fundamental is \SI{6.62}{\hertz}, the
-added-mass ratio is $4.05$, and the resulting wet period is resolved by seventeen
+added-mass ratio is $4.05$, and the resulting wet period is resolved by $7.6$
 steps, so the oscillation is a resolved structural response and not a
 discretisation artefact. It does not decay because the model carries no structural
 damping and the generalised-$\alpha$ dissipation acts on the high modes. Its
 amplitude scales with the sharpness of the load step, which is set by the cavity
 growth rate: the standard deviation of the lift over a marched case falls from
 $0.329$ at $0.2$ chords of cavity per chord of travel to $0.038$ at $0.1$ and
-$0.030$ at $0.05$, so the amplitude is bounded once the front is resolved and the
-figure uses $0.1$. So far this is ordinary.
+$0.030$ at $0.05$, so the amplitude is bounded once the front is resolved.
+Figure~\ref{fig:transient} uses $0.2$, the fastest of the three, because only at
+that rate does the cavity reach its equilibrium extent within the march and the
+marched load loss become comparable with the steady one; the price is the visible
+ringing and two isolated steps, near $s = 1.0$ and $s = 2.3$, at which the lift
+drops out and recovers within one step.
+So far this is ordinary.
 
 What is not ordinary is that the same oscillation survives making the structure
 rigid. At a modulus of \SI{2e12}{\pascal} the tip deflection falls to
@@ -948,7 +980,10 @@ which is bounded above by the largest loss reported, and it moves the centre of
 pressure to three sixteenths of the chord, which is the supercavitating value.
 The computed mean angle of the cavity closure line is within four per cent of the
 angle measured at the instant of washout, and that is a genuine comparison
-because here the cavity length is solved rather than assumed. Wetted and
+because here the cavity length is solved rather than assumed - though the angle
+inherits the immersed aspect ratio directly, where the measurement found it almost
+independent of it, and the stability criterion is therefore trustworthy near the
+aspect ratio at which it was calibrated and not far from it. Wetted and
 ventilated states coexist over seven degrees of incidence at identical
 conditions, differing only in history, which is the bi-stability that a threshold
 with a dead band cannot represent.
