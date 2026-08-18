@@ -12,6 +12,13 @@ coupled by a partitioned scheme with a conservative interface and quasi-Newton
 acceleration, strongly enough to run in water, where the added mass exceeds the
 structural mass and a staggered scheme has no stable step size.
 
+For a surface-piercing hydrofoil it also models **atmospheric ventilation**: the
+free surface enters as an exact linearised image, a gas cavity forms when air
+reaches separated sub-atmospheric flow, its extent and thickness are solved rather
+than prescribed, and the wetted and ventilated states are bi-stable, so a cavity
+survives to incidences well below the one that formed it. Following Harwood,
+Young & Ceccio, J. Fluid Mech. 800 (2016) 5-56.
+
 The fluid solver is the companion repository
 [time-dependent-free-wake-panel-method](https://github.com/ignaziomviola/time-dependent-free-wake-panel-method),
 carried here verbatim and unmodified so that a fresh clone runs its whole
@@ -180,9 +187,17 @@ All four are measured at round-off in [docs/COUPLING.md](docs/COUPLING.md).
 | added-mass instability | staggered coupling diverges at a mass ratio of 0.43; strong coupling holds at 7.1 |
 | energy balance | work in equals stored energy to 4.5e-3 |
 | structural gates | patch test, rigid-body modes and mass properties exact; cantilever and frequencies within 1-2% of the beam solution |
+| free surface | potential zero on the free-surface plane to 1.7e-16; image strengths antisymmetric to 2.4e-14 |
+| sectional cavity model | the washout boundary (4.5) recovered from its own derivation to 2.1e-16; the lift slope's two analytic limits exact |
+| ventilated loads | lift falls to 0.55 of the wetted value, the centre of pressure moves to 0.19c, and the cavity is longest at the waterline - trends verified, magnitudes reported |
+| hysteresis | the same incidence and Froude number give a wetted or a ventilated state depending only on history |
 
 Full tables, with what each number means and where it does not agree, are in
-[docs/FEM.md](docs/FEM.md) and [docs/COUPLING.md](docs/COUPLING.md).
+[docs/FEM.md](docs/FEM.md), [docs/COUPLING.md](docs/COUPLING.md) and
+[docs/VENTILATION.md](docs/VENTILATION.md). The ventilation document is explicit
+about which of its comparisons are verification and which are reported: the
+closed-form and exact-symmetry results are the former, and anything compared with
+a towing tank through a low-order model is the latter.
 
 ## Two things to know before running a coupled case
 
@@ -198,6 +213,14 @@ or set `rho_inf` below one. The driver warns.
 scheme has no stable step size at all. `coupling="loose"` exists so that this
 can be demonstrated; it is not a recommendation.
 
+**A ventilated case has two answers, and needs its history.** The wetted and
+ventilated states are bi-stable over a range of incidence, so `set_regime` picks
+the branch and a sweep maps the loop. `static_aeroelastic` never commits the
+regime, deliberately: which branch a steady solve should return is the caller's
+question. And start a ventilated march from the static equilibrium - a transition
+is a load step, and at these added-mass ratios a march begun elsewhere can distort
+the pinched immersed tip on its first predictor.
+
 ## Commands
 
 ```bash
@@ -205,12 +228,16 @@ python3 test_fem.py                       # structural fast set, ~0.2 s
 FEM_SLOW=1 python3 test_fem.py            # + convergence studies, ~5 s
 python3 test_fsi.py                       # coupling fast set, ~1 s
 FSI_SLOW=1 python3 test_fsi.py            # + coupled physics, ~23 s
+python3 test_vent.py                      # ventilation fast set, ~7 s
+VENT_SLOW=1 python3 test_vent.py          # + coupled ventilation, ~40 s
 python3 test_vendored.py                  # the fluid copies are unmodified
 python3 test_thick_panel_wing.py          # vendored steady suite, unchanged
 python3 test_unsteady_wing.py             # vendored unsteady suite, unchanged
 python3 verify_fem.py                     # structural tables, ~30 s
 python3 verify_fsi.py                     # coupled tables, ~30 s
 python3 verify_fsi.py --case C3           # one case by name
+python3 verify_vent.py                    # ventilation tables, ~2 min
+python3 verify_vent.py --quick            # V1, V2, V5 only
 python3 verify_analytic.py                # vendored: cylinder and Joukowski
 python3 verify_unsteady.py                # vendored: Wagner, Theodorsen (~1 h)
 python3 fem_mesh.py                       # report and check the mesh builders
@@ -226,9 +253,12 @@ library `unittest`, following the upstream convention.
 - [docs/COUPLING.md](docs/COUPLING.md) - the interface operators, the
   partitioned schemes, the two resolution constraints, and the coupled
   verification tables.
+- [docs/VENTILATION.md](docs/VENTILATION.md) - the ventilation formulation, the
+  free-surface image, the cavity boundary-value problem, the regime state machine,
+  and the ventilation verification tables.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - block boundaries, state
-  contracts, public signatures, extension hooks, and what the coupling
-  extension cost against what the fluid architecture predicted.
+  contracts, public signatures, extension hooks, and what the coupling and
+  ventilation extensions cost against what the fluid architecture predicted.
 - [docs/FLUID.md](docs/FLUID.md) - provenance of the vendored fluid solver and
   how to check the copy.
 - [docs/fluid/](docs/fluid/) - the fluid solver's own documents, vendored
@@ -240,6 +270,24 @@ library `unittest`, following the upstream convention.
 
 Nothing in this repository depends on a document living anywhere else: a clone
 carries the full specification of both physics, both codes and every result.
+
+The documents above are authoritative. [docs/paper/](docs/paper/) is not:
+[ventilation.tex](docs/paper/ventilation.tex) is a manuscript in the form of a
+journal paper, validated against the published relations and the stated scalars of
+Harwood, Young & Ceccio (2016), and every number in it comes from `verify_vent.py`
+or from [make_figures.py](docs/paper/make_figures.py), which computes its eleven
+figures into `docs/paper/figures/`. A behaviour change is recorded in the
+authoritative documents first and only then reflected there.
+[build_artifact.py](docs/paper/build_artifact.py) builds
+[ventilation.html](docs/paper/ventilation.html), the same argument as one
+self-contained reading page with every figure inlined, needing neither a network
+nor a LaTeX toolchain.
+
+```bash
+MPLBACKEND=Agg python3 docs/paper/make_figures.py        # all eleven, ~25 min
+MPLBACKEND=Agg python3 docs/paper/make_figures.py loads  # named figures only
+python3 docs/paper/build_artifact.py                     # the reading page
+```
 
 ## Licence
 

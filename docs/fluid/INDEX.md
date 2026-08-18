@@ -38,5 +38,13 @@ and still say so. [../ARCHITECTURE.md](../ARCHITECTURE.md) picks up where it
 leaves off and its closing section records what the extension actually cost
 against what that document predicted.
 
-Extension (3), ventilation and cavitation, remains future work in both
-repositories.
+Extension (3), ventilation and cavitation, is built here and
+`docs/VENTILATION.md` owns it. It uses four of the hooks that document left
+unused: the mirror-covariant corner-pure kernels, for a free-surface image
+realised by mesh doubling; the per-panel doublet/source unknown swap in
+`assemble_system`, for the cavity's prescribed pressure and solved thickness;
+`ds_wrap`, for the cavity integrals; and the trailing-edge fold's handling of a
+prescribed `mu`, for a cavity that reaches the trailing edge. One of that
+document's predictions needed amending, and the amendment is recorded in
+`docs/ARCHITECTURE.md`: a mirror image cannot be convected, only projected.
+Extension (3) remains future work upstream.

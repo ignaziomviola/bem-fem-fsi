@@ -9,5 +9,10 @@ __pycache__/
 *.png
 *.pdf
 
+# ...except the manuscript's, which are committed so that it compiles without a
+# twenty-five-minute run. docs/paper/make_figures.py regenerates them.
+!docs/paper/figures/*.pdf
+!docs/paper/figures/*.png
+
 .DS_Store
 .venv/

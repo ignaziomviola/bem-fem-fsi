@@ -185,6 +185,36 @@ every step and every subiteration.
 The verification cases use 72 to 128 panels for this reason. At 960 panels and
 five subiterations a step costs of the order of five seconds.
 
+## Ventilation, and the third time level
+
+`docs/VENTILATION.md` owns the ventilation model; three of its consequences belong
+here, because they are properties of the coupled step.
+
+**The regime is a time level.** `commit` advances the structural level, the doublet
+strengths and - on a ventilating case - the ventilation regime. The regime obeys
+the same rule as the doublet history for the same reason, and for a stronger one:
+the flow regimes are bi-stable, so a regime that flipped inside a subiteration
+would not merely make the load path-dependent, it would stop the load being a
+function of the displacement at all. Everything the cavity iteration computes is
+returned in `loads["cav"]` and discarded.
+
+**The cavity fixed point nests inside the coupling subiteration**, cold-started
+from the committed extent every call. A warm start would make the converged cavity
+depend on the iteration path at the level of the cavity tolerance, and the outer
+accelerator differentiates that noise. The cost is bounded: the geometry blocks and
+the wake influence are assembled once per subiteration, because the cavity changes
+only which columns of D and S are selected, so each cavity iteration costs one
+extra dense solve. The doubled mesh costs four times the assembly and eight times
+the factorisation, which is why the ventilated verification cases stay at 320
+panels or fewer.
+
+**Three new warnings** join the two resolution measures: the Weber number below
+250, where surface tension would inhibit inception and this model has none; the
+depth Froude number below one, where the free surface deforms steeply and the
+image's linearisation fails; and a washout margin within 0.1 of zero, where the
+ventilated regime is metastable and a marched run will flip. The last is
+bi-stability, not a failure.
+
 ## Verification
 
 ### C1 Transfer conservation
@@ -358,3 +388,12 @@ plus whatever the numerical dissipation removes.
   against the code's own fluid solver. There is no three-dimensional unsteady
   aeroelastic analytical solution to test against, and the coupled unsteady
   results are reported as measured rather than as verified.
+
+- A ventilation transition is a load step, so the second resolution constraint
+  binds hardest there, and the energy balance of C6 does not close while the cavity
+  is growing - entrained air does work this model does not account for. Both are
+  measured in `verify_vent.py` case V6 and reported in `docs/VENTILATION.md`.
+- A coupled ventilated march should be started from the static equilibrium. At the
+  added-mass ratios of a surface-piercing strut a march begun from a
+  non-equilibrium state can distort the pinched immersed tip enough on the first
+  predictor for the vendored bowtie check to fire.
