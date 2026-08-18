@@ -271,6 +271,24 @@ library `unittest`, following the upstream convention.
 Nothing in this repository depends on a document living anywhere else: a clone
 carries the full specification of both physics, both codes and every result.
 
+The documents above are authoritative. [docs/paper/](docs/paper/) is not:
+[ventilation.tex](docs/paper/ventilation.tex) is a manuscript in the form of a
+journal paper, validated against the published relations and the stated scalars of
+Harwood, Young & Ceccio (2016), and every number in it comes from `verify_vent.py`
+or from [make_figures.py](docs/paper/make_figures.py), which computes its eleven
+figures into `docs/paper/figures/`. A behaviour change is recorded in the
+authoritative documents first and only then reflected there.
+[build_artifact.py](docs/paper/build_artifact.py) builds
+[ventilation.html](docs/paper/ventilation.html), the same argument as one
+self-contained reading page with every figure inlined, needing neither a network
+nor a LaTeX toolchain.
+
+```bash
+MPLBACKEND=Agg python3 docs/paper/make_figures.py        # all eleven, ~25 min
+MPLBACKEND=Agg python3 docs/paper/make_figures.py loads  # named figures only
+python3 docs/paper/build_artifact.py                     # the reading page
+```
+
 ## Licence
 
 MIT. See [LICENSE](LICENSE) and [CITATION.cff](CITATION.cff).
