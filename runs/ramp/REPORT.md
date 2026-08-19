@@ -3,20 +3,28 @@
 Ignazio Maria Viola's `bem-fem-fsi` code, branch
 `claude/wing-free-surface-model-8h9b59`, driver `vent_ramp.py`.
 
+Two runs are reported, identical but for the depth Froude number: Fn_h = 10 and
+Fn_h = 1.
+
 ## Summary
 
 A rigid surface-piercing wing ramped from zero to twenty degrees of incidence
-over twenty convective times ventilates at the stall angle and loses about
-three quarters of its lift within five convective times. Ventilation is
+over twenty convective times ventilates at the stall angle, and how much lift
+it then loses is set by the depth Froude number: three quarters at Fn_h = 10
+and one third at Fn_h = 1. Ventilation is
 suppressed while the incidence is below the stall angle of 15 degrees, which is
 the gate on the free-surface seal; the regime then switches from fully wetted
 to partially ventilated within one time step, the cavity front advances at the
 imposed rate of 0.2 chords per chord of travel, and the cavity reaches the
 trailing edge at t = 20. Half of the immersed surface, which is the whole
 suction side, is then dry. The lift coefficient falls from 0.980 at inception
-to a median of 0.213 over the last chord of travel, against 0.825 for the
-wetted baseline evaluated on the same geometry and wake, and the pressure drag
-coefficient falls from 0.103 to 0.044.
+to a median of 0.213 over the last chord of travel at Fn_h = 10, against 0.825
+for the wetted baseline evaluated on the same geometry and wake, and the
+pressure drag coefficient falls from 0.103 to 0.044. At Fn_h = 1 the cavity
+carries a depth-dependent underpressure instead of an effectively atmospheric
+pressure, and the same cavity costs a third of the lift rather than three
+quarters. Ventilation onset is identical in the two runs, and so is the whole
+wetted phase, to the last bit.
 
 Two numerical effects are reported with the results because they are properties
 of the discretisation rather than of the flow: the lift spikes each time the
@@ -46,7 +54,7 @@ reference area for the coefficients is the immersed planform, s = hc.
 | immersed span | h/c | 4 |
 | section | | NACA 0012 |
 | incidence | alpha | 0 at t = 0, linear to 20 degrees at t = 20 |
-| depth Froude number | Fn_h | 10 |
+| depth Froude number | Fn_h | 10 and 1 |
 | stall angle, the seal gate | alpha_s | 15 degrees |
 | cavity underpressure | dsigma | 0, atmospheric |
 | panels, doubled mesh | | 20 chordwise by 20 spanwise |
@@ -64,8 +72,6 @@ mirror tips and coarsen the waterline, which is where the cavity is longest.
 The station spacing ranges from 0.10c at the tip and at the waterline to 0.62c
 at mid-depth (figure 1, right).
 
-The march runs in 29 minutes on four cores and checkpoints every ten steps.
-
 ![The doubled mesh at twenty degrees of incidence, one section on the immersed
 half, and the spanwise station spacing.](mesh.png)
 
@@ -73,7 +79,10 @@ half, and the spanwise station spacing.](mesh.png)
 immersed half, and the spanwise station spacing against depth. The free surface
 is the plane y = 0.
 
-## Results
+## Results at Fn_h = 10
+
+Figures 1 to 4 and the numbers of this section are the Fn_h = 10 run; the next
+section reports what changes at Fn_h = 1.
 
 ### The wetted phase
 
@@ -154,6 +163,71 @@ t = 20.](cavity.png)
 pressure it imposes at 1.69c below the free surface against the wetted
 baseline, and the depth loading of both.
 
+## The effect of the depth Froude number
+
+The Froude number enters this model in one place only, the pressure inside the
+cavity: with the cavity open to the atmosphere the cavitation number at depth z
+is 2z/(h Fn_h^2), so the cavity pressure coefficient runs from zero at the
+waterline to -0.02 at the tip when Fn_h = 10, and from zero to -2.0 when
+Fn_h = 1. The wetted problem does not see the Froude number at all, and neither
+does the seal gate, which is a function of incidence alone.
+
+The two runs confirm both statements and separate what the Froude number
+changes from what it does not.
+
+| quantity | Fn_h = 10 | Fn_h = 1 |
+| --- | --- | --- |
+| lift over the wetted phase | identical to the last bit | identical to the last bit |
+| inception time and incidence | t = 15.0, 15 degrees | t = 15.0, 15 degrees |
+| C_L at inception | 0.980 | 0.980 |
+| cavity C_p, waterline to tip | 0 to -0.02 | 0 to -2.0 |
+| median C_L, last chord of travel | 0.213 | 0.762 |
+| median C_D, last chord of travel | 0.044 | 0.197 |
+| wetted C_L on the same final state | 0.825 | 1.141 |
+| lift removed by the cavity | 74 % | 33 % |
+| dry area at t = 20 | 49.7 % | 36.1 % |
+| mean cavity length at t = 20 | 1.00c | 0.69c |
+| washout margin at inception | 9.58 | 0.06 |
+| washout margin at t = 20 | 3.49 | -0.14 |
+| cavity iterations per time level | 2.1 | 8.0 |
+| load departure at a front crossing, 95th percentile | 0.60 | 0.25 |
+| discarded waterline drift | 0.017c | 0.018c |
+
+Three differences matter.
+
+**The cavity costs less lift at low Froude number.** The cavity replaces the
+wetted suction with its own pressure, and that pressure is far below ambient at
+depth when Fn_h = 1, so the loading is preserved over most of the immersed
+span; only the shallow strips, where the cavity pressure approaches atmospheric,
+lose their suction. The lift retained over the last chord of travel is 0.762
+against 0.213, and the pressure drag is four times larger, because a cavity at
+2.0 of underpressure applies a large suction to the leeward face.
+
+**The cavity is shorter and does not close the whole chord.** The mean cavity
+length at t = 20 is 0.69c against 1.00c and the dry area is 36.1 % against
+49.7 %, although the front reaches the trailing edge at the deepest stations in
+both runs. The extent rule closes the cavity where the wetted pressure has
+recovered to the cavity pressure, and at Fn_h = 1 that condition is met before
+the trailing edge over the shallower half of the span.
+
+**The ventilated state is metastable at Fn_h = 1.** The washout margin is 0.06
+at inception and -0.14 at t = 20, against 9.58 and 3.49; the margin changes
+sign, so the ventilated branch is on the washout boundary and a marched run may
+flip back. The model is bi-stable, and at this Froude number the two branches
+are close in the sense that this diagnostic measures, so the Fn_h = 1 result
+should be read as one branch of two rather than as the state the flow must take.
+
+The cavity fixed point also works four times harder, at 8.0 iterations per time
+level against 2.1, and the load carries a step-to-step oscillation over the
+whole ventilated phase rather than isolated spikes.
+
+![Lift, ventilated area and washout margin for the two Froude
+numbers.](compare.png)
+
+**Figure 5.** Lift, ventilated area and washout margin against time, for
+Fn_h = 10 and Fn_h = 1. The thin traces are the value at each time level and the
+thick traces their running medians. The two runs coincide until inception.
+
 ## Numerical behaviour that is not physics
 
 **The load spikes at each front crossing.** After inception the lift and the
@@ -174,6 +248,22 @@ gives the smooth histories above. This is the open item recorded in
 `docs/VENTILATION.md`, and at this incidence it is fatal rather than merely
 inaccurate.
 
+**The Fn_h = 1 run sits on the model's own validity boundary.** The
+free-surface image is a high-Froude linearisation on an undeformed plane, and
+the driver warns at or below Fn_h = 1, which is exactly where this run sits. The
+discarded waterline drift, which is the linearised wave elevation, is 0.018c,
+comparable with the Fn_h = 10 run, but the linearisation itself is what is in
+question at order-one Froude number, not the size of the term it discards. The
+Fn_h = 1 results are therefore the model's extrapolation limit and want a
+free-surface solver to confirm.
+
+**The Dirichlet cavity closure loses meaning at Fn_h = 1.** Re-evaluating the
+cavity at the final state without the growth limit returns a mean closure angle
+of 77.7 degrees, above the threshold at which the re-entrant jet has an upstream
+component, and a cavity thickness that overflows. The loads reported above come
+from the pressure and are unaffected, but the cavity thickness, its volume and
+its closure angle are not results at this Froude number.
+
 **Two cavity diagnostics are degenerate at these extents.** The closure line is
 uniform across the span once the cavity is full-depth, so the fit that returns
 the mean closure angle is degenerate and reports 90 degrees throughout the
@@ -187,10 +277,15 @@ pressure, but neither should be quoted as a result.
 
 ```bash
 MPLBACKEND=Agg python3 vent_ramp.py --nc 10 --nspan 10 --dt 0.05 --steps 400 \
-                                    --nwake 120 --growth 0.2 --out runs/ramp
-MPLBACKEND=Agg python3 vent_ramp.py --nc 10 --nspan 10 --out runs/ramp --replot
+        --nwake 120 --growth 0.2 --fn 10 --out runs/ramp
+MPLBACKEND=Agg python3 vent_ramp.py --nc 10 --nspan 10 --dt 0.05 --steps 400 \
+        --nwake 120 --growth 0.2 --fn 1  --out runs/ramp_fn1
+MPLBACKEND=Agg python3 vent_ramp.py --nc 10 --nspan 10 --out runs/ramp \
+        --replot --compare runs/ramp_fn1
 ```
 
-The first command marches and writes the four figures and `history.npz`, which
-holds every recorded quantity at every time level; the second redraws the
-figures from the saved history and state without marching again.
+The first two commands march and write the four figures and `history.npz`,
+which holds every recorded quantity at every time level; the third redraws the
+figures from the saved history and state without marching again and adds the
+comparison of the two runs. Each march takes 29 minutes on four cores and
+checkpoints every ten time levels.

@@ -363,6 +363,35 @@ def plot_history(hist, save):
     plt.close(fig)
 
 
+def plot_compare(runs, save):
+    """Two runs side by side. -> lift, dry area and cavity length against time
+
+    `runs` is a list of (label, history dict), the first being the reference.
+    """
+    fig, ax = plt.subplots(1, 3, figsize=(13, 3.9))
+    styles = [("tab:blue", "-"), ("tab:red", "--")]
+    for (label, h), (colour, dash) in zip(runs, styles):
+        t = h["t"]
+        ax[0].plot(t, _median(h["CL"]), dash, color=colour, label=label)
+        ax[0].plot(t, h["CL"], color=colour, linewidth=0.4, alpha=0.25)
+        ax[1].plot(t, 100 * h["area_dry"] / h["area_total"], dash,
+                   color=colour, label=label)
+        ax[2].plot(t, _median(h["margin"]), dash, color=colour, label=label)
+    ax[0].set_ylabel("$C_L$"), ax[0].set_title("lift, running median",
+                                               fontsize=10)
+    ax[1].set_ylabel("dry area (% of the immersed surface)")
+    ax[1].set_title("ventilated area", fontsize=10)
+    ax[2].set_ylabel("washout margin")
+    ax[2].axhline(0.0, color="0.7", linewidth=0.8)
+    ax[2].set_title("distance from the washout boundary", fontsize=10)
+    for a in ax:
+        a.set_xlabel("t (convective times)")
+        a.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(save, dpi=160)
+    plt.close(fig)
+
+
 def plot_loading(fluid, vent, cav, save):
     """The cavity footprint and the pressure it imposes, at the final level."""
     pan = fluid["panels"]
@@ -422,6 +451,8 @@ def main():
                         "image is a high-Froude linearisation on an undeformed "
                         "plane, so watch history['drift_y'] as it falls")
     p.add_argument("--out", type=str, default=OUT)
+    p.add_argument("--compare", type=str, default=None,
+                   help="a second run directory; writes compare.png in --out")
     p.add_argument("--replot", action="store_true",
                    help="redraw the figures from the saved history and state")
     args = p.parse_args()
@@ -451,6 +482,11 @@ def main():
         plot_wake(fluid, vent, os.path.join(out_dir, "wake.png"))
         plot_history(hist, os.path.join(out_dir, "history.png"))
         plot_loading(fluid, vent, cav_end, os.path.join(out_dir, "cavity.png"))
+        if args.compare:
+            other = dict(np.load(os.path.join(args.compare, "history.npz")))
+            plot_compare([(f"$Fn_h$ = {float(hist['fn_h']):g}", hist),
+                          (f"$Fn_h$ = {float(other['fn_h']):g}", other)],
+                         os.path.join(out_dir, "compare.png"))
         print(f"figures under {out_dir}/")
         return
 
