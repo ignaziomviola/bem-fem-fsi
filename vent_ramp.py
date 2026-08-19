@@ -25,6 +25,7 @@ This file writes; it writes only under runs/ramp/.
 
 import argparse
 import os
+import pickle
 import warnings
 
 import numpy as np
@@ -106,8 +107,15 @@ def wetted_area(pan, vent, cav):
 # ------------------------------------------------------------------ the march
 
 def march(n_c=20, nspan_half=20, dt=0.05, nsteps=400, nwake=None,
-          growth_chords=0.2, verbose=True):
-    """The ramp, marched. -> (history, fluid, vent)"""
+          growth_chords=0.2, verbose=True, checkpoint=None, every=10):
+    """The ramp, marched. -> (history, fluid, vent)
+
+    With `checkpoint` set, the fluid state, the ventilation state and the
+    history so far are written there every `every` steps and the march resumes
+    from that file if it already exists. The container this runs in is
+    reclaimed on idle, and a four-hour march that has to start again from
+    t = 0 is a four-hour march lost.
+    """
     points0 = ramp_mesh(0.0, n_c, nspan_half)
     onset = fk.make_onset(np.array([-10.0, 10.0]), np.array([1.0, 1.0]))
     fluid = usw.init_unsteady_state(points0, onset, u_ref=1.0,
@@ -164,7 +172,18 @@ def march(n_c=20, nspan_half=20, dt=0.05, nsteps=400, nwake=None,
     vcv.commit_vent(vent, cav, 0.0, dt)
     record(0.0, 0.0, cav, loads, 0.0)
 
-    for n in range(1, nsteps + 1):
+    start = 1
+    if checkpoint and os.path.exists(checkpoint):
+        with open(checkpoint, "rb") as fh:
+            saved = pickle.load(fh)
+        fluid, vent = saved["fluid"], saved["vent"]
+        hist = {k: list(v) for k, v in saved["hist"].items()}
+        mu_committed = [m.copy() for m in saved["mu"]]
+        start = saved["step"] + 1
+        print(f"  resumed from {checkpoint} at step {saved['step']}, "
+              f"t = {saved['step'] * dt:.3f}", flush=True)
+
+    for n in range(start, nsteps + 1):
         t = n * dt
         alpha, alpha_dot = alpha_of(t)
         # shed ONCE per step, before the solve, and project the image wake
@@ -186,6 +205,11 @@ def march(n_c=20, nspan_half=20, dt=0.05, nsteps=400, nwake=None,
         vcv.commit_vent(vent, cav, t, dt)
         vent["drift_y"] = drift
         record(t, alpha, cav, loads, drift)
+        if checkpoint and (n % every == 0 or n == nsteps):
+            with open(checkpoint + ".tmp", "wb") as fh:
+                pickle.dump({"fluid": fluid, "vent": vent, "hist": hist,
+                             "mu": mu_committed, "step": n}, fh)
+            os.replace(checkpoint + ".tmp", checkpoint)
         if verbose and (n % 10 == 0 or n <= 3):
             print(f"  step {n:4d}  t = {t:6.3f}  alpha = {alpha:5.2f} deg  "
                   f"CL = {hist['CL'][-1]:+.4f}  {vent['regime']:>2s}  "
@@ -366,7 +390,8 @@ def main():
 
     hist, fluid, vent = march(n_c=args.nc, nspan_half=args.nspan, dt=args.dt,
                               nsteps=args.steps, nwake=args.nwake,
-                              growth_chords=args.growth)
+                              growth_chords=args.growth,
+                              checkpoint=os.path.join(out_dir, "state.pkl"))
     np.savez(os.path.join(out_dir, "history.npz"), **hist)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
