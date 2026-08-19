@@ -105,7 +105,8 @@ def wetted_area(pan, vent, cav):
 
 # ------------------------------------------------------------------ the march
 
-def march(n_c=20, nspan_half=20, dt=0.05, nsteps=400, nwake=None, verbose=True):
+def march(n_c=20, nspan_half=20, dt=0.05, nsteps=400, nwake=None,
+          growth_chords=0.2, verbose=True):
     """The ramp, marched. -> (history, fluid, vent)"""
     points0 = ramp_mesh(0.0, n_c, nspan_half)
     onset = fk.make_onset(np.array([-10.0, 10.0]), np.array([1.0, 1.0]))
@@ -115,7 +116,8 @@ def march(n_c=20, nspan_half=20, dt=0.05, nsteps=400, nwake=None, verbose=True):
     vent = vcv.build_vent(maps, vm.half_points(points0, maps), h=H, chord=CHORD,
                           u_ref=1.0, alpha_rad=0.0, fn_h=FN_H, rho=1.0,
                           gamma_st=GAMMA_ST,
-                          alpha_stall=np.radians(ALPHA_STALL), regime="FW")
+                          alpha_stall=np.radians(ALPHA_STALL), regime="FW",
+                          growth_chords=growth_chords)
 
     keys = ["t", "alpha", "CL", "CD", "CM", "regime", "l_c_max", "l_c_mean",
             "d_cav", "phi_bar", "area_dry", "area_wet", "area_total",
@@ -191,7 +193,8 @@ def march(n_c=20, nspan_half=20, dt=0.05, nsteps=400, nwake=None, verbose=True):
                   f"  l_c,max = {hist['l_c_max'][-1]:.3f}", flush=True)
 
     out = {k: np.array(v) for k, v in hist.items()}
-    out.update(dt=dt, n_c=n_c, nspan_half=nspan_half, fn_h=FN_H, h=H)
+    out.update(dt=dt, n_c=n_c, nspan_half=nspan_half, fn_h=FN_H, h=H,
+               growth_chords=growth_chords)
     return out, fluid, vent
 
 
@@ -342,32 +345,41 @@ def main():
     p.add_argument("--dt", type=float, default=0.05)
     p.add_argument("--steps", type=int, default=400)
     p.add_argument("--nwake", type=int, default=None)
+    p.add_argument("--growth", type=float, default=0.2,
+                   help="cavity front speed, in chords of cavity per chord of "
+                        "travel; 0.2 is the resolved value, the model's default "
+                        "of 1.0 is not resolvable at any usable dt")
+    p.add_argument("--out", type=str, default=OUT)
     args = p.parse_args()
-    os.makedirs(OUT, exist_ok=True)
+    out_dir = args.out
+    os.makedirs(out_dir, exist_ok=True)
 
     print(f"rigid surface-piercing strut, h/c = {H:.0f}, Fn_h = {FN_H:.0f}, "
           f"alpha 0 -> {ALPHA_END:.0f} deg in {T_END:.0f} convective times")
     print(f"  {2 * args.nc} x {2 * args.nspan} panels on the doubled mesh "
           f"({args.nc} chordwise per surface, {args.nspan} spanwise immersed), "
           f"dt = {args.dt}, {args.steps} steps")
+    print(f"  cavity front limited to {args.growth} chords per chord of travel"
+          f" ({args.growth * args.dt:.3f} c per step)")
     plot_mesh(ramp_mesh(ALPHA_END, args.nc, args.nspan), None,
-              os.path.join(OUT, "mesh.png"))
+              os.path.join(out_dir, "mesh.png"))
 
     hist, fluid, vent = march(n_c=args.nc, nspan_half=args.nspan, dt=args.dt,
-                              nsteps=args.steps, nwake=args.nwake)
-    np.savez(os.path.join(OUT, "history.npz"), **hist)
+                              nsteps=args.steps, nwake=args.nwake,
+                              growth_chords=args.growth)
+    np.savez(os.path.join(out_dir, "history.npz"), **hist)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         _, cav_end, _ = vsl.solve_cavity(fluid, vent, rho=1.0)
-    plot_wake(fluid, vent, os.path.join(OUT, "wake.png"))
-    plot_history(hist, os.path.join(OUT, "history.png"))
-    plot_loading(fluid, vent, cav_end, os.path.join(OUT, "cavity.png"))
+    plot_wake(fluid, vent, os.path.join(out_dir, "wake.png"))
+    plot_history(hist, os.path.join(out_dir, "history.png"))
+    plot_loading(fluid, vent, cav_end, os.path.join(out_dir, "cavity.png"))
     frame = vcv.chordwise_frame(fluid["panels"])
     rep = vcv.cavity_report(fluid["panels"], frame, vent, cav_end)
     print("\nfinal state")
     for k, v in rep.items():
         print(f"  {k:>18s}  {v}")
-    print(f"\nfigures under {OUT}/")
+    print(f"\nfigures under {out_dir}/")
 
 
 if __name__ == "__main__":

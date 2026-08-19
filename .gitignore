@@ -17,3 +17,4 @@ __pycache__/
 .DS_Store
 .venv/
 runs_ramp.log
+runs_ramp_g02.log
