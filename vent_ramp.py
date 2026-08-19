@@ -177,6 +177,7 @@ def march(n_c=20, nspan_half=20, dt=0.05, nsteps=400, nwake=None,
         with open(checkpoint, "rb") as fh:
             saved = pickle.load(fh)
         fluid, vent = saved["fluid"], saved["vent"]
+        fluid["onset"] = onset
         hist = {k: list(v) for k, v in saved["hist"].items()}
         mu_committed = [m.copy() for m in saved["mu"]]
         start = saved["step"] + 1
@@ -206,8 +207,11 @@ def march(n_c=20, nspan_half=20, dt=0.05, nsteps=400, nwake=None,
         vent["drift_y"] = drift
         record(t, alpha, cav, loads, drift)
         if checkpoint and (n % every == 0 or n == nsteps):
+            # the onset is a closure and does not pickle; it is an input, so it
+            # is rebuilt on resume rather than stored
+            saveable = {k: v for k, v in fluid.items() if k != "onset"}
             with open(checkpoint + ".tmp", "wb") as fh:
-                pickle.dump({"fluid": fluid, "vent": vent, "hist": hist,
+                pickle.dump({"fluid": saveable, "vent": vent, "hist": hist,
                              "mu": mu_committed, "step": n}, fh)
             os.replace(checkpoint + ".tmp", checkpoint)
         if verbose and (n % 10 == 0 or n <= 3):
