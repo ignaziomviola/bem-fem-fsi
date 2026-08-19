@@ -229,63 +229,91 @@ def march(n_c=20, nspan_half=20, dt=0.05, nsteps=400, nwake=None,
 # --------------------------------------------------------------- the figures
 
 def plot_mesh(points, vent, save):
-    fig = plt.figure(figsize=(10, 4.5))
-    ax = fig.add_subplot(1, 2, 1, projection="3d")
+    """The doubled mesh, a section, and the spanwise spacing."""
+    fig = plt.figure(figsize=(13, 4.4))
+    gs = fig.add_gridspec(1, 3, width_ratios=(1.6, 1.0, 1.0))
+    ax = fig.add_subplot(gs[0], projection="3d")
     x, y, z = points[..., 0], points[..., 1], points[..., 2]
     ax.plot_wireframe(x, y, z, rstride=1, cstride=1, linewidth=0.3,
                       color="0.35")
-    ax.plot_surface(np.array([[-1.0, 1.0], [-1.0, 1.0]]),
-                    np.zeros((2, 2)),
-                    np.array([[-1.0, -1.0], [1.0, 1.0]]),
-                    color="tab:blue", alpha=0.15)
-    ax.set_xlabel("x/c"), ax.set_ylabel("y/c (depth)"), ax.set_zlabel("z/c")
-    ax.set_title("doubled mesh: immersed strut and its negative image")
+    span = np.array([[-0.8, 0.8], [-0.8, 0.8]])
+    ax.plot_surface(span, np.zeros((2, 2)), np.array([[-0.8, -0.8],
+                                                      [0.8, 0.8]]),
+                    color="tab:blue", alpha=0.2)
+    ax.set_xlabel("x/c"), ax.set_ylabel("y/c"), ax.set_zlabel("z/c")
+    ax.set_title("doubled mesh: strut and negative image", fontsize=9)
+    ax.view_init(elev=16, azim=-72)
+    ax.set_xticks([-0.5, 0.0, 0.5])
+    ax.set_zticks([-0.5, 0.0, 0.5])
+    ax.set_yticks([-4, -2, 0, 2, 4])
+    ax.tick_params(labelsize=7, pad=-2)
     try:
-        ax.set_box_aspect((2.0, 4.0, 2.0))
+        ax.set_box_aspect((1.0, 4.0, 1.0))
     except AttributeError:
         pass
-    ax2 = fig.add_subplot(1, 2, 2)
-    ax2.plot(points[:, :, 0], points[:, :, 1], color="0.35", linewidth=0.3)
-    ax2.plot(points[:, :, 0].T, points[:, :, 1].T, color="0.35", linewidth=0.3)
-    ax2.axhline(0.0, color="tab:blue", linewidth=1.5)
-    ax2.set_xlabel("x/c"), ax2.set_ylabel("y/c (depth)")
-    ax2.set_title("planform: cosine stations at tip and waterline")
+
+    ax2 = fig.add_subplot(gs[1])
+    j = points.shape[1] // 4              # a station on the immersed half
+    ax2.plot(points[:, j, 0], points[:, j, 2], "-o", color="0.3",
+             markersize=2.5, linewidth=0.8)
+    ax2.set_xlabel("x/c"), ax2.set_ylabel("z/c")
     ax2.set_aspect("equal")
+    ax2.set_title(f"section at y/c = {points[0, j, 1]:.2f}: cosine wrap",
+                  fontsize=9)
+
+    ax3 = fig.add_subplot(gs[2])
+    y_st = points[0, :, 1]
+    ax3.plot(np.diff(y_st), 0.5 * (y_st[:-1] + y_st[1:]), "-o", color="0.3",
+             markersize=2.5, linewidth=0.8)
+    ax3.axhline(0.0, color="tab:blue", linewidth=1.5)
+    ax3.set_xlabel(r"station spacing $\Delta y/c$")
+    ax3.set_ylabel("y/c")
+    ax3.set_title("cosine spacing, fine at tip and waterline", fontsize=9)
     fig.tight_layout()
     fig.savefig(save, dpi=160)
     plt.close(fig)
 
 
 def plot_wake(fluid, vent, save):
-    wake = fluid["wake"]
-    nodes = wake["nodes"]
-    pan = fluid["panels"]
-    fig = plt.figure(figsize=(10, 4.5))
-    ax = fig.add_subplot(1, 2, 1, projection="3d")
-    body = pan["points"]
-    ax.plot_wireframe(body[..., 0], body[..., 1], body[..., 2], rstride=2,
-                      cstride=2, linewidth=0.2, color="0.5")
-    ax.plot_wireframe(nodes[..., 0], nodes[..., 1], nodes[..., 2], rstride=1,
-                      cstride=1, linewidth=0.25, color="tab:red")
-    ax.set_xlabel("x/c"), ax.set_ylabel("y/c"), ax.set_zlabel("z/c")
-    ax.set_title(f"free wake at t = 20 ({nodes.shape[0] - 1} rows)")
-    ax2 = fig.add_subplot(1, 2, 2)
-    ax2.plot(nodes[..., 0], nodes[..., 1], color="tab:red", linewidth=0.3)
-    ax2.plot(body[:, :, 0], body[:, :, 1], color="0.5", linewidth=0.2)
-    ax2.axhline(0.0, color="tab:blue", linewidth=1.5)
-    ax2.set_xlabel("x/c"), ax2.set_ylabel("y/c (depth)")
-    ax2.set_title("wake, top view: real sheet and its image")
+    """The shed sheet at the final level, from the side and from above."""
+    nodes = fluid["wake"]["nodes"]
+    body = fluid["panels"]["points"]
+    fig, ax = plt.subplots(1, 2, figsize=(11, 4.4))
+    for a, (i, k, xl, yl) in zip(ax, [(0, 2, "x/c", "z/c"),
+                                      (0, 1, "x/c", "y/c (depth)")]):
+        a.plot(nodes[..., i], nodes[..., k], color="tab:red", linewidth=0.25)
+        a.plot(nodes[..., i].T, nodes[..., k].T, color="tab:red",
+               linewidth=0.15, alpha=0.5)
+        a.plot(body[..., i], body[..., k], color="0.25", linewidth=0.4)
+        a.set_xlabel(xl), a.set_ylabel(yl)
+        a.set_aspect("equal")
+    ax[0].set_title(f"wake at t = 20, side view "
+                    f"({nodes.shape[0] - 1} rows, 6 c)", fontsize=10)
+    ax[1].axhline(0.0, color="tab:blue", linewidth=1.5)
+    ax[1].set_title("wake from above: real sheet and its image", fontsize=10)
     fig.tight_layout()
     fig.savefig(save, dpi=160)
     plt.close(fig)
 
 
+def _median(x, w=5):
+    """Running median, to separate the trend from the front-crossing spikes."""
+    x = np.asarray(x, dtype=float)
+    pad = np.pad(x, (w // 2, w // 2), mode="edge")
+    return np.array([np.median(pad[k:k + w]) for k in range(len(x))])
+
+
 def plot_history(hist, save):
     t, a = hist["t"], hist["alpha"]
     fig, ax = plt.subplots(3, 2, figsize=(11, 9), sharex=True)
-    ax[0, 0].plot(t, hist["CL"], color="tab:blue")
+    ax[0, 0].plot(t, hist["CL"], color="tab:blue", linewidth=0.6, alpha=0.45,
+                  label="$C_L$")
+    ax[0, 0].plot(t, _median(hist["CL"]), color="tab:blue", linewidth=1.6,
+                  label="running median")
     ax[0, 0].set_ylabel("$C_L$ (side force)")
-    ax[0, 0].set_title("lift history")
+    ax[0, 0].set_title("lift history; spikes are the cavity front crossing "
+                       "a panel", fontsize=10)
+    ax[0, 0].legend(loc="lower left", fontsize=8)
     axa = ax[0, 0].twinx()
     axa.plot(t, a, color="0.6", linewidth=0.8)
     axa.set_ylabel(r"$\alpha$ (deg)", color="0.5")
@@ -294,19 +322,20 @@ def plot_history(hist, save):
                   color="tab:red", label="dry (ventilated)")
     ax[0, 1].plot(t, 100 * hist["area_wet"] / hist["area_total"],
                   color="tab:blue", label="wetted")
-    ax[0, 1].set_ylabel("area (% of immersed surface)")
-    ax[0, 1].set_title("dry and wetted area")
+    ax[0, 1].set_ylabel("area (% of the immersed surface)")
+    ax[0, 1].set_title("dry and wetted area", fontsize=10)
     ax[0, 1].legend(loc="center left", fontsize=8)
 
-    ax[1, 0].plot(t, hist["CD"], color="tab:green")
+    ax[1, 0].plot(t, hist["CD"], color="tab:green", linewidth=0.6, alpha=0.45)
+    ax[1, 0].plot(t, _median(hist["CD"]), color="tab:green", linewidth=1.6)
     ax[1, 0].set_ylabel("$C_D$ (pressure)")
-    ax[1, 0].set_title("drag history")
+    ax[1, 0].set_title("drag history", fontsize=10)
 
     ax[1, 1].plot(t, hist["l_c_max"], label=r"$\max L_c/c$")
-    ax[1, 1].plot(t, hist["l_c_mean"], label=r"mean $L_c/c$ (ventilated)")
-    ax[1, 1].plot(t, hist["d_cav"] / hist_h(hist), label=r"$d_{cav}/h$")
+    ax[1, 1].plot(t, hist["l_c_mean"], label=r"mean $L_c/c$ over the cavity")
+    ax[1, 1].plot(t, hist["d_cav"] / float(hist["h"]), label=r"$d_{cav}/h$")
     ax[1, 1].set_ylabel("cavity extent")
-    ax[1, 1].set_title("cavity length and depth")
+    ax[1, 1].set_title("cavity length and depth", fontsize=10)
     ax[1, 1].legend(fontsize=8)
 
     ax[2, 0].step(t, hist["regime"], where="post", color="tab:purple")
@@ -314,53 +343,63 @@ def plot_history(hist, save):
     ax[2, 0].set_yticklabels(vcv.REGIMES)
     ax[2, 0].set_ylabel("regime")
     ax[2, 0].set_xlabel("t (convective times)")
-    ax[2, 0].set_title("regime, and the ventilation-ready area fraction")
+    ax[2, 0].set_title("regime, and the ventilation-ready area", fontsize=10)
     axr = ax[2, 0].twinx()
     axr.plot(t, hist["ready_fraction"], color="0.6", linewidth=0.8)
-    axr.set_ylabel("ready fraction", color="0.5")
+    axr.set_ylabel("ready fraction of the suction side", color="0.5")
 
-    ax[2, 1].plot(t, hist["CM"], color="tab:orange", label="$C_M$ (yaw)")
-    ax[2, 1].plot(t, hist["margin"], color="tab:cyan", label="washout margin")
+    ax[2, 1].plot(t, _median(hist["CM"]), color="tab:orange",
+                  label="$C_M$ (yaw)")
+    ax[2, 1].plot(t, _median(hist["margin"]), color="tab:cyan",
+                  label="washout margin")
     ax[2, 1].axhline(0.0, color="0.7", linewidth=0.6)
     ax[2, 1].set_xlabel("t (convective times)")
-    ax[2, 1].set_title("yawing moment and washout margin")
+    ax[2, 1].set_title("yawing moment and washout margin (medians)",
+                       fontsize=10)
     ax[2, 1].legend(fontsize=8)
     fig.tight_layout()
     fig.savefig(save, dpi=160)
     plt.close(fig)
 
 
-def hist_h(hist):
-    return H
-
-
 def plot_loading(fluid, vent, cav, save):
-    """Depth loading and the cavity footprint at the final level."""
+    """The cavity footprint and the pressure it imposes, at the final level."""
     pan = fluid["panels"]
-    real = np.asarray(vent["real_mask"], dtype=bool)
-    shape = (pan["areas"].shape[0] // (vent["shape_full"][1] - 1),
-             vent["shape_full"][1] - 1)
+    nspan = vent["shape_full"][1] - 1
+    shape = (pan["areas"].shape[0] // nspan, nspan)
     weight = np.asarray(cav["weight"]).reshape(shape)
     depth = vcv.panel_depth(pan, vent["y_fs"]).reshape(shape)
-    fig, ax = plt.subplots(1, 2, figsize=(11, 4.2))
-    keep = real.reshape(shape).any(axis=0)
-    im = ax[0].pcolormesh(np.arange(shape[0] + 1),
-                          np.r_[depth[0, keep], depth[0, keep][-1]],
-                          weight[:, keep].T, cmap="Reds", vmin=0.0, vmax=1.0,
-                          shading="auto")
+    real = np.asarray(vent["real_mask"], dtype=bool).reshape(shape)
+    keep = real.any(axis=0)
+    fig, ax = plt.subplots(1, 3, figsize=(13, 4.0))
+    im = ax[0].pcolormesh(np.arange(shape[0] + 1), depth[0, keep],
+                          weight[:, keep][:, :-1].T, cmap="Reds", vmin=0.0,
+                          vmax=1.0, shading="auto")
     ax[0].set_xlabel("wrap panel index (TE $\\to$ LE $\\to$ TE)")
-    ax[0].set_ylabel("depth y/c")
-    ax[0].set_title("cavity coverage on the immersed half, t = 20")
+    ax[0].set_ylabel("depth below the free surface, /c")
+    ax[0].invert_yaxis()
+    ax[0].set_title("cavity coverage, t = 20", fontsize=10)
     fig.colorbar(im, ax=ax[0], label="cavity fraction")
-    cp = np.asarray(cav["cp"]).reshape(shape) if "cp" in cav else None
-    if cp is not None:
-        ax[1].plot(cp[:, keep].mean(axis=1), label="mean $C_p$ over depth")
-    ax[1].plot(np.asarray(cav["cp_baseline"]).reshape(shape)[:, keep].mean(axis=1),
-               label="wetted baseline $C_p$")
+
+    cp = np.asarray(cav["cp"]).reshape(shape)
+    base = np.asarray(cav["cp_baseline"]).reshape(shape)
+    j = np.argmax(keep) + int(keep.sum()) // 2
+    ax[1].plot(base[:, j], label="wetted baseline")
+    ax[1].plot(cp[:, j], label="ventilated")
     ax[1].set_xlabel("wrap panel index")
     ax[1].set_ylabel("$C_p$")
     ax[1].legend(fontsize=8)
-    ax[1].set_title("depth-averaged pressure, ventilated against wetted")
+    ax[1].set_title(f"pressure at y/c = {-depth[0, j]:.2f}", fontsize=10)
+
+    load_wet = (base * np.asarray(pan["areas"]).reshape(shape)).sum(axis=0)
+    load_vent = (cp * np.asarray(pan["areas"]).reshape(shape)).sum(axis=0)
+    ax[2].plot(-load_wet[keep], depth[0, keep], label="wetted baseline")
+    ax[2].plot(-load_vent[keep], depth[0, keep], label="ventilated")
+    ax[2].invert_yaxis()
+    ax[2].set_xlabel(r"sectional load $-\int C_p\,\mathrm{d}A$")
+    ax[2].set_ylabel("depth below the free surface, /c")
+    ax[2].legend(fontsize=8)
+    ax[2].set_title("depth loading, t = 20", fontsize=10)
     fig.tight_layout()
     fig.savefig(save, dpi=160)
     plt.close(fig)
@@ -378,6 +417,8 @@ def main():
                         "travel; 0.2 is the resolved value, the model's default "
                         "of 1.0 is not resolvable at any usable dt")
     p.add_argument("--out", type=str, default=OUT)
+    p.add_argument("--replot", action="store_true",
+                   help="redraw the figures from the saved history and state")
     args = p.parse_args()
     out_dir = args.out
     os.makedirs(out_dir, exist_ok=True)
@@ -391,6 +432,22 @@ def main():
           f" ({args.growth * args.dt:.3f} c per step)")
     plot_mesh(ramp_mesh(ALPHA_END, args.nc, args.nspan), None,
               os.path.join(out_dir, "mesh.png"))
+
+    if args.replot:
+        hist = dict(np.load(os.path.join(out_dir, "history.npz")))
+        with open(os.path.join(out_dir, "state.pkl"), "rb") as fh:
+            saved = pickle.load(fh)
+        fluid, vent = saved["fluid"], saved["vent"]
+        fluid["onset"] = fk.make_onset(np.array([-10.0, 10.0]),
+                                       np.array([1.0, 1.0]))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            _, cav_end, _ = vsl.solve_cavity(fluid, vent, rho=1.0)
+        plot_wake(fluid, vent, os.path.join(out_dir, "wake.png"))
+        plot_history(hist, os.path.join(out_dir, "history.png"))
+        plot_loading(fluid, vent, cav_end, os.path.join(out_dir, "cavity.png"))
+        print(f"figures under {out_dir}/")
+        return
 
     hist, fluid, vent = march(n_c=args.nc, nspan_half=args.nspan, dt=args.dt,
                               nsteps=args.steps, nwake=args.nwake,
