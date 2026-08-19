@@ -107,7 +107,8 @@ def wetted_area(pan, vent, cav):
 # ------------------------------------------------------------------ the march
 
 def march(n_c=20, nspan_half=20, dt=0.05, nsteps=400, nwake=None,
-          growth_chords=0.2, verbose=True, checkpoint=None, every=10):
+          growth_chords=0.2, fn_h=FN_H, verbose=True, checkpoint=None,
+          every=10):
     """The ramp, marched. -> (history, fluid, vent)
 
     With `checkpoint` set, the fluid state, the ventilation state and the
@@ -122,7 +123,7 @@ def march(n_c=20, nspan_half=20, dt=0.05, nsteps=400, nwake=None,
                                     config={"lifting": True, "nwake": 0})
     maps = vm.mirror_maps(points0.shape, image=True)
     vent = vcv.build_vent(maps, vm.half_points(points0, maps), h=H, chord=CHORD,
-                          u_ref=1.0, alpha_rad=0.0, fn_h=FN_H, rho=1.0,
+                          u_ref=1.0, alpha_rad=0.0, fn_h=fn_h, rho=1.0,
                           gamma_st=GAMMA_ST,
                           alpha_stall=np.radians(ALPHA_STALL), regime="FW",
                           growth_chords=growth_chords)
@@ -221,7 +222,7 @@ def march(n_c=20, nspan_half=20, dt=0.05, nsteps=400, nwake=None,
                   f"  l_c,max = {hist['l_c_max'][-1]:.3f}", flush=True)
 
     out = {k: np.array(v) for k, v in hist.items()}
-    out.update(dt=dt, n_c=n_c, nspan_half=nspan_half, fn_h=FN_H, h=H,
+    out.update(dt=dt, n_c=n_c, nspan_half=nspan_half, fn_h=fn_h, h=H,
                growth_chords=growth_chords)
     return out, fluid, vent
 
@@ -416,6 +417,10 @@ def main():
                    help="cavity front speed, in chords of cavity per chord of "
                         "travel; 0.2 is the resolved value, the model's default "
                         "of 1.0 is not resolvable at any usable dt")
+    p.add_argument("--fn", type=float, default=FN_H,
+                   help="depth Froude number u/sqrt(g h); the free-surface "
+                        "image is a high-Froude linearisation on an undeformed "
+                        "plane, so watch history['drift_y'] as it falls")
     p.add_argument("--out", type=str, default=OUT)
     p.add_argument("--replot", action="store_true",
                    help="redraw the figures from the saved history and state")
@@ -423,7 +428,7 @@ def main():
     out_dir = args.out
     os.makedirs(out_dir, exist_ok=True)
 
-    print(f"rigid surface-piercing strut, h/c = {H:.0f}, Fn_h = {FN_H:.0f}, "
+    print(f"rigid surface-piercing strut, h/c = {H:.0f}, Fn_h = {args.fn:g}, "
           f"alpha 0 -> {ALPHA_END:.0f} deg in {T_END:.0f} convective times")
     print(f"  {2 * args.nc} x {2 * args.nspan} panels on the doubled mesh "
           f"({args.nc} chordwise per surface, {args.nspan} spanwise immersed), "
@@ -451,7 +456,7 @@ def main():
 
     hist, fluid, vent = march(n_c=args.nc, nspan_half=args.nspan, dt=args.dt,
                               nsteps=args.steps, nwake=args.nwake,
-                              growth_chords=args.growth,
+                              growth_chords=args.growth, fn_h=args.fn,
                               checkpoint=os.path.join(out_dir, "state.pkl"))
     np.savez(os.path.join(out_dir, "history.npz"), **hist)
     with warnings.catch_warnings():
